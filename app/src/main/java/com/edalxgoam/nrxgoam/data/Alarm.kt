@@ -4,8 +4,10 @@ import java.util.*
 
 data class Alarm(
     val id: Long = System.currentTimeMillis(),
-    val hour: Int,
-    val minute: Int,
+    val title: String,
+    val description: String,
+    val category: String,
+    val date: Date,
     val isEnabled: Boolean = true,
     val createdAt: Date = Date()
 ) 

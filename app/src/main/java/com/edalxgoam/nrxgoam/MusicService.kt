@@ -6,15 +6,25 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 class MusicService : Service() {
     private var mediaPlayer: MediaPlayer? = null
     private val binder = MusicBinder()
+    private var originalVolume: Int = 0
+    private var volumeJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     inner class MusicBinder : Binder() {
         fun getService(): MusicService = this@MusicService
@@ -23,29 +33,76 @@ class MusicService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // Guardar el volumen original
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START_MUSIC -> startMusic()
+            ACTION_START_MUSIC -> startMusic(intent)
             ACTION_STOP_MUSIC -> stopMusic()
         }
         return START_STICKY
     }
 
-    private fun startMusic() {
+    private fun startMusic(intent: Intent) {
         if (mediaPlayer == null) {
             initializeMediaPlayer()
         }
-        startForeground(NOTIFICATION_ID, createNotification())
+        
+        val alarmId = intent.getLongExtra("alarm_id", -1)
+        val alarmTitle = intent.getStringExtra("alarm_title") ?: "¡Alarma!"
+        val alarmDescription = intent.getStringExtra("alarm_description") ?: "Toca para abrir la aplicación"
+        val alarmCategory = intent.getStringExtra("alarm_category") ?: "General"
+        
+        startForeground(alarmId.toInt(), createNotification(alarmTitle, alarmDescription, alarmCategory))
+        
+        // Iniciar el incremento gradual del volumen
+        startVolumeIncrease()
+    }
+
+    private fun startVolumeIncrease() {
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        
+        // Cancelar cualquier incremento de volumen en curso
+        volumeJob?.cancel()
+        
+        // Iniciar el incremento gradual
+        volumeJob = serviceScope.launch {
+            var currentVolume = originalVolume
+            val stepDuration = 500L // 500ms entre cada incremento
+            val volumeStep = 1
+            
+            while (currentVolume < maxVolume) {
+                currentVolume = (currentVolume + volumeStep).coerceAtMost(maxVolume)
+                audioManager.setStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    currentVolume,
+                    0
+                )
+                kotlinx.coroutines.delay(stepDuration)
+            }
+        }
     }
 
     private fun stopMusic() {
+        volumeJob?.cancel()
         mediaPlayer?.apply {
             stop()
             release()
         }
         mediaPlayer = null
+        
+        // Restaurar el volumen original
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        audioManager.setStreamVolume(
+            AudioManager.STREAM_MUSIC,
+            originalVolume,
+            0
+        )
+        
         stopForeground(true)
         stopSelf()
     }
@@ -66,7 +123,7 @@ class MusicService : Service() {
         }
     }
 
-    private fun createNotification(): Notification {
+    private fun createNotification(title: String, description: String, category: String): Notification {
         val stopIntent = Intent(this, MusicService::class.java).apply {
             action = ACTION_STOP_MUSIC
         }
@@ -88,8 +145,8 @@ class MusicService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("¡Alarma!")
-            .setContentText("Toca para abrir la aplicación")
+            .setContentTitle(title)
+            .setContentText(description)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -97,6 +154,7 @@ class MusicService : Service() {
             .setAutoCancel(true)
             .addAction(android.R.drawable.ic_media_pause, "Detener", stopPendingIntent)
             .setContentIntent(openAppPendingIntent)
+            .setSubText(category)
             .build()
     }
 
@@ -123,7 +181,6 @@ class MusicService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "AlarmChannel"
-        private const val NOTIFICATION_ID = 1
         const val ACTION_START_MUSIC = "com.edalxgoam.nrxgoam.action.START_MUSIC"
         const val ACTION_STOP_MUSIC = "com.edalxgoam.nrxgoam.action.STOP_MUSIC"
     }

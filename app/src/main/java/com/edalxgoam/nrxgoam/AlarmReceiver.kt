@@ -18,6 +18,11 @@ class AlarmReceiver : BroadcastReceiver() {
             // Iniciar el servicio de música
             val serviceIntent = Intent(context, MusicService::class.java).apply {
                 action = MusicService.ACTION_START_MUSIC
+                // Pasar los extras del intent original
+                putExtra("alarm_id", intent.getLongExtra("alarm_id", -1))
+                putExtra("alarm_title", intent.getStringExtra("alarm_title"))
+                putExtra("alarm_description", intent.getStringExtra("alarm_description"))
+                putExtra("alarm_category", intent.getStringExtra("alarm_category"))
             }
             ContextCompat.startForegroundService(context, serviceIntent)
 
