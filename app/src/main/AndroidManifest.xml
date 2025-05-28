@@ -36,6 +36,16 @@
             </intent-filter>
         </activity>
         
+        <activity
+            android:name=".ui.screens.AlarmActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NRXGoAm" />
+
+        <activity
+            android:name=".ui.screens.PantryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NRXGoAm" />
+
         <service
             android:name=".MusicService"
             android:exported="false"

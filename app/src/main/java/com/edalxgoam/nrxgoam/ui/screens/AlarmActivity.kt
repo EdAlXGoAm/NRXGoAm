@@ -1,10 +1,8 @@
-package com.edalxgoam.nrxgoam
+package com.edalxgoam.nrxgoam.ui.screens
 
 import android.Manifest
 import android.app.AlarmManager
-import android.app.DatePickerDialog
 import android.app.PendingIntent
-import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,37 +11,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.edalxgoam.nrxgoam.AlarmReceiver
+import com.edalxgoam.nrxgoam.MusicService
 import com.edalxgoam.nrxgoam.data.Alarm
 import com.edalxgoam.nrxgoam.data.AlarmRepository
-import com.edalxgoam.nrxgoam.ui.screens.AlarmActivity
-import com.edalxgoam.nrxgoam.ui.screens.PantryActivity
 import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
-import java.util.*
-import kotlinx.coroutines.*
+import java.util.Date
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 
-class MainActivity : ComponentActivity() {
+class AlarmActivity : ComponentActivity() {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private lateinit var alarmRepository: AlarmRepository
     
@@ -79,17 +67,30 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             NRXGoAmTheme {
+                var alarms by remember { mutableStateOf(alarmRepository.getAllAlarms()) }
+                
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainMenu(
+                    AlarmScreen(
                         modifier = Modifier.padding(innerPadding),
-                        onAlarmClick = {
-                            val intent = Intent(this, AlarmActivity::class.java)
-                            startActivity(intent)
+                        onStartMusic = { startMusicService() },
+                        onStopMusic = { stopMusicService() },
+                        onSetAlarm = { title, description, category, date -> 
+                            scheduleAlarm(title, description, category, date)
+                            alarms = alarmRepository.getAllAlarms()
                         },
-                        onPantryClick = {
-                            val intent = Intent(this, PantryActivity::class.java)
-                            startActivity(intent)
-                        }
+                        onDeleteAlarm = { alarmId -> 
+                            deleteAlarm(alarmId)
+                            alarms = alarmRepository.getAllAlarms()
+                        },
+                        onEditAlarm = { alarm -> 
+                            editAlarm(alarm)
+                            alarms = alarmRepository.getAllAlarms()
+                        },
+                        onDuplicateAlarm = { alarm -> 
+                            duplicateAlarm(alarm)
+                            alarms = alarmRepository.getAllAlarms()
+                        },
+                        alarms = alarms
                     )
                 }
             }
@@ -230,89 +231,5 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
-        stopMusicService()
     }
-}
-
-@Composable
-fun MainMenu(
-    modifier: Modifier = Modifier,
-    onAlarmClick: () -> Unit,
-    onPantryClick: () -> Unit
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Menú Principal",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            MenuIcon(
-                label = "Alarma",
-                iconResourceId = R.drawable.icon_alarm,
-                onClick = onAlarmClick
-            )
-            
-            MenuIcon(
-                label = "Despensa",
-                iconResourceId = R.drawable.icon_despensa,
-                onClick = onPantryClick
-            )
-            
-            // Aquí puedes agregar más íconos de menú en el futuro
-        }
-    }
-}
-
-@Composable
-fun MenuIcon(
-    label: String,
-    iconResourceId: Int,
-    onClick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .padding(16.dp)
-            .width(100.dp)
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable(onClick = onClick)
-        ) {
-            Image(
-                painter = painterResource(id = iconResourceId),
-                contentDescription = label,
-                modifier = Modifier.size(68.dp)
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun MainMenuPreview() {
-    NRXGoAmTheme {
-        MainMenu(onAlarmClick = {}, onPantryClick = {})
-    }
-}
+} 
