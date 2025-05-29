@@ -37,8 +37,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.edalxgoam.nrxgoam.data.Alarm
 import com.edalxgoam.nrxgoam.data.AlarmRepository
+import com.edalxgoam.nrxgoam.repository.FirebaseManager
+import com.edalxgoam.nrxgoam.ui.components.AlarmIconFromFirebase
+import com.edalxgoam.nrxgoam.ui.components.PantryIconFromFirebase
 import com.edalxgoam.nrxgoam.ui.screens.AlarmActivity
 import com.edalxgoam.nrxgoam.ui.screens.PantryActivity
+import com.edalxgoam.nrxgoam.ui.screens.TaskActivity
 import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
 import java.util.*
 import kotlinx.coroutines.*
@@ -59,6 +63,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Inicializar Firebase
+        try {
+            FirebaseManager.initialize(this)
+            println("Firebase inicializado correctamente")
+            
+            // Precargar iconos en background
+            scope.launch {
+                try {
+                    FirebaseManager.preloadIcons(this@MainActivity)
+                    println("Iconos precargados desde Firebase Storage")
+                } catch (e: Exception) {
+                    println("Error al precargar iconos: ${e.message}")
+                }
+            }
+            
+        } catch (e: Exception) {
+            println("Error al inicializar Firebase: ${e.message}")
+            e.printStackTrace()
+        }
         
         alarmRepository = AlarmRepository(this)
         
@@ -88,6 +112,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onPantryClick = {
                             val intent = Intent(this, PantryActivity::class.java)
+                            startActivity(intent)
+                        },
+                        onTaskClick = {
+                            val intent = Intent(this, TaskActivity::class.java)
                             startActivity(intent)
                         }
                     )
@@ -238,7 +266,8 @@ class MainActivity : ComponentActivity() {
 fun MainMenu(
     modifier: Modifier = Modifier,
     onAlarmClick: () -> Unit,
-    onPantryClick: () -> Unit
+    onPantryClick: () -> Unit,
+    onTaskClick: () -> Unit
 ) {
     Column(
         modifier = modifier
@@ -257,20 +286,83 @@ fun MainMenu(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
         ) {
-            MenuIcon(
+            FirebaseMenuIcon(
                 label = "Alarma",
-                iconResourceId = R.drawable.icon_alarm,
+                iconType = FirebaseIconType.ALARM,
                 onClick = onAlarmClick
             )
             
-            MenuIcon(
+            FirebaseMenuIcon(
                 label = "Despensa",
-                iconResourceId = R.drawable.icon_despensa,
+                iconType = FirebaseIconType.PANTRY,
                 onClick = onPantryClick
+            )
+            
+            FirebaseMenuIcon(
+                label = "Tareas",
+                iconType = FirebaseIconType.TASK,
+                onClick = onTaskClick
             )
             
             // Aquí puedes agregar más íconos de menú en el futuro
         }
+    }
+}
+
+enum class FirebaseIconType {
+    ALARM,
+    PANTRY,
+    TASK
+}
+
+@Composable
+fun FirebaseMenuIcon(
+    label: String,
+    iconType: FirebaseIconType,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .padding(16.dp)
+            .width(100.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .clickable(onClick = onClick)
+        ) {
+            when (iconType) {
+                FirebaseIconType.ALARM -> {
+                    AlarmIconFromFirebase(
+                        modifier = Modifier.size(68.dp),
+                        contentDescription = label
+                    )
+                }
+                FirebaseIconType.PANTRY -> {
+                    PantryIconFromFirebase(
+                        modifier = Modifier.size(68.dp),
+                        contentDescription = label
+                    )
+                }
+                FirebaseIconType.TASK -> {
+                    // Usar el mismo ícono que Alarma para Tareas
+                    AlarmIconFromFirebase(
+                        modifier = Modifier.size(68.dp),
+                        contentDescription = label
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -313,6 +405,6 @@ fun MenuIcon(
 @Composable
 fun MainMenuPreview() {
     NRXGoAmTheme {
-        MainMenu(onAlarmClick = {}, onPantryClick = {})
+        MainMenu(onAlarmClick = {}, onPantryClick = {}, onTaskClick = {})
     }
 }

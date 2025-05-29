@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "387716917046",
+    "project_id": "aixgoam",
+    "storage_bucket": "aixgoam.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:387716917046:android:91a08738fae06a614f3597",
+        "android_client_info": {
+          "package_name": "com.edalxgoam.nrxgoam"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "387716917046-your-oauth-client-id.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD49YEWjdJZBsKWCiH9IId1JxxrFNuUHMM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "387716917046-your-oauth-client-id.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+} 

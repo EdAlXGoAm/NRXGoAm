@@ -1,0 +1,287 @@
+package com.edalxgoam.nrxgoam.utils
+
+import android.content.Context
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import com.edalxgoam.nrxgoam.repository.FirebaseManager
+import com.edalxgoam.nrxgoam.repository.IconCacheRepository
+import com.edalxgoam.nrxgoam.ui.components.AlarmIconFromFirebase
+import com.edalxgoam.nrxgoam.ui.components.PantryIconFromFirebase
+import kotlinx.coroutines.launch
+
+/**
+ * Ejemplos de uso del sistema de cache de iconos desde Firebase Storage
+ */
+class IconCacheExample {
+    
+    /**
+     * EJEMPLO 1: Verificar estado del cache
+     */
+    suspend fun checkCacheStatus(context: Context): CacheStatus {
+        val iconRepo = FirebaseManager.getIconCacheRepository(context)
+        val cacheSize = iconRepo.getCacheSize()
+        
+        return CacheStatus(
+            cacheSize = cacheSize,
+            cacheSizeFormatted = formatBytes(cacheSize),
+            hasIcons = cacheSize > 0
+        )
+    }
+    
+    /**
+     * EJEMPLO 2: Precargar todos los iconos manualmente
+     */
+    suspend fun preloadAllIcons(context: Context): PreloadResult {
+        return try {
+            val iconRepo = FirebaseManager.getIconCacheRepository(context)
+            iconRepo.preloadAllIcons()
+            PreloadResult.Success("Iconos precargados correctamente")
+        } catch (e: Exception) {
+            PreloadResult.Error(e.message ?: "Error desconocido")
+        }
+    }
+    
+    /**
+     * EJEMPLO 3: Limpiar cache de iconos
+     */
+    fun clearIconCache(context: Context): Boolean {
+        val iconRepo = FirebaseManager.getIconCacheRepository(context)
+        return iconRepo.clearIconCache()
+    }
+    
+    /**
+     * EJEMPLO 4: Obtener icono específico
+     */
+    suspend fun getSpecificIcon(context: Context, iconType: IconType): IconResult {
+        return try {
+            val iconRepo = FirebaseManager.getIconCacheRepository(context)
+            val drawable = when (iconType) {
+                IconType.ALARM -> iconRepo.getAlarmIcon()
+                IconType.PANTRY -> iconRepo.getPantryIcon()
+            }
+            IconResult.Success(drawable)
+        } catch (e: Exception) {
+            IconResult.Error(e.message ?: "Error al obtener icono")
+        }
+    }
+    
+    private fun formatBytes(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B"
+        val kb = bytes / 1024.0
+        if (kb < 1024) return "%.1f KB".format(kb)
+        val mb = kb / 1024.0
+        return "%.1f MB".format(mb)
+    }
+}
+
+// Clases de datos para los resultados
+data class CacheStatus(
+    val cacheSize: Long,
+    val cacheSizeFormatted: String,
+    val hasIcons: Boolean
+)
+
+sealed class PreloadResult {
+    data class Success(val message: String) : PreloadResult()
+    data class Error(val message: String) : PreloadResult()
+}
+
+sealed class IconResult {
+    data class Success(val drawable: android.graphics.drawable.Drawable) : IconResult()
+    data class Error(val message: String) : IconResult()
+}
+
+enum class IconType {
+    ALARM,
+    PANTRY
+}
+
+/**
+ * COMPOSABLE DE EJEMPLO: Panel de control del cache de iconos
+ */
+@Composable
+fun IconCacheControlPanel() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val iconExample = remember { IconCacheExample() }
+    
+    var cacheStatus by remember { mutableStateOf<CacheStatus?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf("") }
+    
+    // Verificar estado del cache al inicio
+    LaunchedEffect(Unit) {
+        cacheStatus = iconExample.checkCacheStatus(context)
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            text = "Control de Cache de Iconos Firebase",
+            style = MaterialTheme.typography.headlineSmall
+        )
+        
+        // Estado del cache
+        Card {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Estado del Cache",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                cacheStatus?.let { status ->
+                    Text("Tamaño: ${status.cacheSizeFormatted}")
+                    Text("Iconos en cache: ${if (status.hasIcons) "Sí" else "No"}")
+                } ?: Text("Cargando...")
+            }
+        }
+        
+        // Botones de control
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        isLoading = true
+                        val result = iconExample.preloadAllIcons(context)
+                        statusMessage = when (result) {
+                            is PreloadResult.Success -> result.message
+                            is PreloadResult.Error -> "Error: ${result.message}"
+                        }
+                        cacheStatus = iconExample.checkCacheStatus(context)
+                        isLoading = false
+                    }
+                },
+                enabled = !isLoading,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Precargar")
+            }
+            
+            Button(
+                onClick = {
+                    scope.launch {
+                        val success = iconExample.clearIconCache(context)
+                        statusMessage = if (success) {
+                            "Cache limpiado"
+                        } else {
+                            "Error al limpiar cache"
+                        }
+                        cacheStatus = iconExample.checkCacheStatus(context)
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Limpiar")
+            }
+        }
+        
+        // Mensaje de estado
+        if (statusMessage.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (statusMessage.startsWith("Error")) {
+                        MaterialTheme.colorScheme.errorContainer
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer
+                    }
+                )
+            ) {
+                Text(
+                    text = statusMessage,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        }
+        
+        // Indicador de carga
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        
+        // Vista previa de iconos
+        Text(
+            text = "Vista Previa de Iconos",
+            style = MaterialTheme.typography.titleMedium
+        )
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                AlarmIconFromFirebase(
+                    modifier = Modifier.size(48.dp),
+                    contentDescription = "Icono de Alarma"
+                )
+                Text("Alarma", style = MaterialTheme.typography.bodySmall)
+            }
+            
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                PantryIconFromFirebase(
+                    modifier = Modifier.size(48.dp),
+                    contentDescription = "Icono de Despensa"
+                )
+                Text("Despensa", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+/**
+ * COMPOSABLE DE EJEMPLO: Monitor de descarga de iconos
+ */
+@Composable
+fun IconDownloadMonitor() {
+    val context = LocalContext.current
+    var downloadStatus by remember { mutableStateOf("Esperando descarga...") }
+    
+    LaunchedEffect(Unit) {
+        try {
+            downloadStatus = "Descargando iconos..."
+            FirebaseManager.preloadIcons(context)
+            downloadStatus = "Iconos descargados correctamente"
+        } catch (e: Exception) {
+            downloadStatus = "Error: ${e.message}"
+        }
+    }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "Monitor de Descarga",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = downloadStatus)
+        }
+    }
+} 

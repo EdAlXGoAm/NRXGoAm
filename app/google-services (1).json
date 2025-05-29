@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "387716917046",
+    "firebase_url": "https://aixgoam-default-rtdb.firebaseio.com",
+    "project_id": "aixgoam",
+    "storage_bucket": "aixgoam.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:387716917046:android:e6a019c7fee22d0c4f3597",
+        "android_client_info": {
+          "package_name": "com.edalxgoam.nrxgoam"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "387716917046-vqt7ku9rdjcmn9o0lns2im6lvos0jkkh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.edalxgoam.nrxgoam",
+            "certificate_hash": "53f6e7177b3aa984109fe6ac3436e61e9f446c04"
+          }
+        },
+        {
+          "client_id": "387716917046-pu93d006081cb80k3jp9pq89j5qq9mav.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBqizLlaVrri_r-fdtuG_z5C2LXF61wsdQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "387716917046-pu93d006081cb80k3jp9pq89j5qq9mav.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

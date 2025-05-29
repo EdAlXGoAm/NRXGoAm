@@ -1,0 +1,219 @@
+package com.edalxgoam.nrxgoam.utils
+
+import android.content.Context
+import android.net.Uri
+import com.edalxgoam.nrxgoam.model.*
+import com.edalxgoam.nrxgoam.repository.FirebaseManager
+import com.edalxgoam.nrxgoam.repository.UploadProgress
+import kotlinx.coroutines.flow.collect
+
+/**
+ * Ejemplos de uso de Firebase Storage y Firestore
+ * Esta clase muestra cómo usar los repositorios que hemos creado
+ */
+class FirebaseExample {
+    
+    private val firestoreRepo = FirebaseManager.firestoreRepository
+    private val storageRepo = FirebaseManager.storageRepository
+    
+    /**
+     * EJEMPLOS DE FIRESTORE
+     */
+    
+    // Ejemplo 1: Crear un usuario
+    suspend fun createUser(name: String, email: String): Result<String> {
+        val user = User(
+            name = name,
+            email = email,
+            profileImageUrl = ""
+        )
+        
+        return firestoreRepo.createDocument(
+            collection = FirebaseCollections.USERS,
+            data = user
+        )
+    }
+    
+    // Ejemplo 2: Obtener un usuario por ID
+    suspend fun getUser(userId: String): Result<User?> {
+        return firestoreRepo.getDocument(
+            collection = FirebaseCollections.USERS,
+            documentId = userId,
+            clazz = User::class.java
+        )
+    }
+    
+    // Ejemplo 3: Obtener todas las notas de un usuario
+    suspend fun getUserNotes(userId: String): Result<List<Note>> {
+        return firestoreRepo.getCollectionWithQuery(
+            collection = FirebaseCollections.NOTES,
+            clazz = Note::class.java
+        ) { query ->
+            query.whereEqualTo("userId", userId)
+                .orderBy("createdAt")
+        }
+    }
+    
+    // Ejemplo 4: Crear una nueva nota
+    suspend fun createNote(title: String, content: String, userId: String): Result<String> {
+        val note = Note(
+            title = title,
+            content = content,
+            userId = userId,
+            tags = listOf("ejemplo", "firebase")
+        )
+        
+        return firestoreRepo.createDocument(
+            collection = FirebaseCollections.NOTES,
+            data = note
+        )
+    }
+    
+    // Ejemplo 5: Actualizar una nota
+    suspend fun updateNote(noteId: String, newTitle: String, newContent: String): Result<Unit> {
+        val updates = mapOf(
+            "title" to newTitle,
+            "content" to newContent,
+            "updatedAt" to FirebaseUtils.serverTimestamp()
+        )
+        
+        return firestoreRepo.updateDocument(
+            collection = FirebaseCollections.NOTES,
+            documentId = noteId,
+            updates = updates
+        )
+    }
+    
+    // Ejemplo 6: Eliminar una nota
+    suspend fun deleteNote(noteId: String): Result<Unit> {
+        return firestoreRepo.deleteDocument(
+            collection = FirebaseCollections.NOTES,
+            documentId = noteId
+        )
+    }
+    
+    // Ejemplo 7: Escuchar cambios en tiempo real
+    fun listenToUserNotes(userId: String, onNotesChanged: (List<Note>) -> Unit) {
+        // Este ejemplo requiere configuración adicional en tu UI
+        // firestoreRepo.listenToCollection(FirebaseCollections.NOTES, Note::class.java)
+        //     .collect { notes ->
+        //         val userNotes = notes.filter { it.userId == userId }
+        //         onNotesChanged(userNotes)
+        //     }
+    }
+    
+    /**
+     * EJEMPLOS DE FIREBASE STORAGE
+     */
+    
+    // Ejemplo 8: Subir imagen de perfil
+    suspend fun uploadProfileImage(userId: String, imageUri: Uri): Result<String> {
+        val fileName = "profile_${System.currentTimeMillis()}.jpg"
+        val filePath = FirebaseUtils.getProfileImagePath(userId, fileName)
+        
+        val metadata = mapOf(
+            "userId" to userId,
+            "type" to "profile_image",
+            "uploadedAt" to System.currentTimeMillis().toString()
+        )
+        
+        return storageRepo.uploadFile(filePath, imageUri, metadata)
+    }
+    
+    // Ejemplo 9: Subir archivo con progreso
+    fun uploadFileWithProgress(
+        userId: String, 
+        fileUri: Uri, 
+        fileName: String,
+        onProgress: (UploadProgress) -> Unit
+    ) {
+        val filePath = FirebaseUtils.getUserStoragePath(userId, fileName)
+        
+        val metadata = mapOf(
+            "userId" to userId,
+            "originalName" to fileName,
+            "uploadedAt" to System.currentTimeMillis().toString()
+        )
+        
+        // En tu composable o fragment, usa esto:
+        // LaunchedEffect(fileUri) {
+        //     storageRepo.uploadFileWithProgress(filePath, fileUri, metadata)
+        //         .collect { progress ->
+        //             onProgress(progress)
+        //         }
+        // }
+    }
+    
+    // Ejemplo 10: Descargar archivo
+    suspend fun downloadFile(filePath: String): Result<ByteArray> {
+        return storageRepo.downloadFile(filePath)
+    }
+    
+    // Ejemplo 11: Obtener URL de descarga
+    suspend fun getFileDownloadUrl(filePath: String): Result<String> {
+        return storageRepo.getDownloadUrl(filePath)
+    }
+    
+    // Ejemplo 12: Eliminar archivo
+    suspend fun deleteFile(filePath: String): Result<Unit> {
+        return storageRepo.deleteFile(filePath)
+    }
+    
+    // Ejemplo 13: Listar archivos de un usuario
+    suspend fun listUserFiles(userId: String): Result<List<String>> {
+        val directoryPath = "ASE_users/$userId/files"
+        return storageRepo.listFiles(directoryPath).map { references ->
+            references.map { it.name }
+        }
+    }
+    
+    /**
+     * EJEMPLO COMPLETO: Crear usuario con imagen de perfil
+     */
+    suspend fun createUserWithProfileImage(
+        name: String,
+        email: String,
+        profileImageUri: Uri
+    ): Result<User> {
+        
+        // 1. Crear el usuario en Firestore
+        val userResult = createUser(name, email)
+        if (userResult.isFailure) {
+            return Result.failure(userResult.exceptionOrNull()!!)
+        }
+        
+        val userId = userResult.getOrNull()!!
+        
+        // 2. Subir la imagen de perfil
+        val imageUploadResult = uploadProfileImage(userId, profileImageUri)
+        if (imageUploadResult.isFailure) {
+            // Si falla la subida, eliminar el usuario creado
+            firestoreRepo.deleteDocument(FirebaseCollections.USERS, userId)
+            return Result.failure(imageUploadResult.exceptionOrNull()!!)
+        }
+        
+        val imageUrl = imageUploadResult.getOrNull()!!
+        
+        // 3. Actualizar el usuario con la URL de la imagen
+        val updateResult = firestoreRepo.updateDocument(
+            collection = FirebaseCollections.USERS,
+            documentId = userId,
+            updates = mapOf(
+                "profileImageUrl" to imageUrl,
+                "updatedAt" to FirebaseUtils.serverTimestamp()
+            )
+        )
+        
+        if (updateResult.isFailure) {
+            return Result.failure(updateResult.exceptionOrNull()!!)
+        }
+        
+        // 4. Obtener el usuario actualizado
+        val finalUserResult = getUser(userId)
+        return if (finalUserResult.isSuccess) {
+            Result.success(finalUserResult.getOrNull()!!)
+        } else {
+            Result.failure(finalUserResult.exceptionOrNull()!!)
+        }
+    }
+} 

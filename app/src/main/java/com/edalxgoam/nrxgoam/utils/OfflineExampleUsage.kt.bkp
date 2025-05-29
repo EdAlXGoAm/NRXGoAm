@@ -1,0 +1,209 @@
+package com.edalxgoam.nrxgoam.utils
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.edalxgoam.nrxgoam.model.*
+import com.edalxgoam.nrxgoam.repository.FirebaseManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+/**
+ * Ejemplos prácticos de uso de las funcionalidades offline de Firestore
+ */
+class OfflineExampleUsage {
+    
+    private val firestoreRepo = FirebaseManager.firestoreRepository
+    
+    /**
+     * EJEMPLO 1: Crear datos que se sincronizan automáticamente
+     */
+    suspend fun createUserOfflineCapable(name: String, email: String): Result<String> {
+        val user = User(name = name, email = email)
+        
+        // Este método funciona igual online y offline:
+        // - Online: Se guarda en servidor + cache local
+        // - Offline: Se guarda en cache local y se sincroniza cuando haya conexión
+        return firestoreRepo.createDocument(
+            collection = FirebaseCollections.USERS,
+            data = user
+        )
+    }
+    
+    /**
+     * EJEMPLO 2: Leer datos con cache automático
+     */
+    suspend fun getUserWithOfflineSupport(userId: String): Result<User?> {
+        // Este método:
+        // - Online: Intenta leer del servidor, si falla lee del cache
+        // - Offline: Lee directamente del cache local
+        return firestoreRepo.getDocument(
+            collection = FirebaseCollections.USERS,
+            documentId = userId,
+            clazz = User::class.java
+        )
+    }
+    
+    /**
+     * EJEMPLO 3: Escuchar cambios en tiempo real con soporte offline
+     */
+    fun listenToUsersWithOfflineSync(): Flow<List<User>> {
+        // Este Flow:
+        // - Online: Recibe actualizaciones del servidor en tiempo real
+        // - Offline: Muestra datos del cache local
+        // - Al reconectarse: Se sincroniza automáticamente y emite actualizaciones
+        return firestoreRepo.listenToCollection(
+            collection = FirebaseCollections.USERS,
+            clazz = User::class.java
+        )
+    }
+    
+    /**
+     * EJEMPLO 4: Manejar escrituras offline
+     */
+    suspend fun updateUserOffline(userId: String, newName: String): Result<Unit> {
+        val updates = mapOf(
+            "name" to newName,
+            "updatedAt" to FirebaseUtils.serverTimestamp()
+        )
+        
+        // Esta actualización:
+        // - Online: Se aplica inmediatamente en servidor + cache
+        // - Offline: Se guarda localmente y se sincroniza al reconectarse
+        return firestoreRepo.updateDocument(
+            collection = FirebaseCollections.USERS,
+            documentId = userId,
+            updates = updates
+        )
+    }
+    
+    /**
+     * EJEMPLO 5: Verificar estado de sincronización
+     */
+    suspend fun waitForSync(): Boolean {
+        return try {
+            // Espera a que todas las escrituras pendientes se sincronicen
+            FirebaseManager.waitForPendingWrites().await()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
+    /**
+     * EJEMPLO 6: Forzar modo offline para testing
+     */
+    suspend fun testOfflineMode() {
+        try {
+            // Deshabilitar red (simular sin conexión)
+            FirebaseManager.disableNetwork().await()
+            
+            // Crear usuario en modo offline
+            val result = createUserOfflineCapable("Usuario Offline", "offline@test.com")
+            println("Usuario creado offline: ${result.isSuccess}")
+            
+            // Habilitar red nuevamente
+            FirebaseManager.enableNetwork().await()
+            
+            // Esperar sincronización
+            waitForSync()
+            println("Datos sincronizados con el servidor")
+            
+        } catch (e: Exception) {
+            println("Error en test offline: ${e.message}")
+        }
+    }
+}
+
+/**
+ * EJEMPLO COMPOSABLE: Mostrar datos con soporte offline
+ */
+@Composable
+fun UserListWithOfflineSupport() {
+    val offlineExample = remember { OfflineExampleUsage() }
+    
+    // Estado de la lista de usuarios
+    val users by offlineExample.listenToUsersWithOfflineSync()
+        .collectAsState(initial = emptyList())
+    
+    // Estado de conexión (opcional)
+    var isOnline by remember { mutableStateOf(true) }
+    var isSyncing by remember { mutableStateOf(false) }
+    
+    // Función para crear usuario
+    suspend fun createUser(name: String, email: String) {
+        isSyncing = true
+        val result = offlineExample.createUserOfflineCapable(name, email)
+        
+        if (result.isSuccess) {
+            println("Usuario creado: ${result.getOrNull()}")
+        } else {
+            println("Error: ${result.exceptionOrNull()?.message}")
+        }
+        isSyncing = false
+    }
+    
+    // Función para actualizar usuario
+    suspend fun updateUser(userId: String, newName: String) {
+        isSyncing = true
+        val result = offlineExample.updateUserOffline(userId, newName)
+        
+        if (result.isSuccess) {
+            println("Usuario actualizado")
+        } else {
+            println("Error: ${result.exceptionOrNull()?.message}")
+        }
+        isSyncing = false
+    }
+    
+    // UI que muestra la lista
+    // La lista se actualiza automáticamente cuando:
+    // 1. Se crean/modifican usuarios localmente
+    // 2. Otros usuarios hacen cambios (cuando hay conexión)
+    // 3. Se sincroniza al reconectarse
+    
+    // Ejemplo de uso en LaunchedEffect
+    LaunchedEffect(Unit) {
+        // Esperar a que se sincronicen cambios pendientes
+        if (offlineExample.waitForSync()) {
+            println("Todos los datos están sincronizados")
+        }
+    }
+}
+
+/**
+ * FUNCIONES DE UTILIDAD PARA MONITOREAR OFFLINE
+ */
+object OfflineUtils {
+    
+    /**
+     * Verifica si hay escrituras pendientes de sincronización
+     */
+    suspend fun hasPendingWrites(): Boolean {
+        return try {
+            // Si waitForPendingWrites() toma tiempo, hay escrituras pendientes
+            val startTime = System.currentTimeMillis()
+            FirebaseManager.waitForPendingWrites().await()
+            val duration = System.currentTimeMillis() - startTime
+            duration > 100 // Si toma más de 100ms, probablemente había escrituras pendientes
+        } catch (e: Exception) {
+            true // Si hay error, asumimos que hay escrituras pendientes
+        }
+    }
+    
+    /**
+     * Limpia completamente la cache offline (usar con cuidado)
+     */
+    suspend fun clearOfflineCache(): Boolean {
+        return try {
+            FirebaseManager.clearPersistence().await()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+} 

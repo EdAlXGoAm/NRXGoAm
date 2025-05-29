@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">NRXGoAm</string>
+    <!-- Client ID del google-services.json con client_type: 3 (Web OAuth client) -->
+    <string name="default_web_client_id">387716917046-pu93d006081cb80k3jp9pq89j5qq9mav.apps.googleusercontent.com</string>
 </resources>

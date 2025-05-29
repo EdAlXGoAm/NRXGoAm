@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permisos para Firebase -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Permisos existentes -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -43,6 +48,11 @@
 
         <activity
             android:name=".ui.screens.PantryActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NRXGoAm" />
+
+        <activity
+            android:name=".ui.screens.TaskActivity"
             android:exported="false"
             android:theme="@style/Theme.NRXGoAm" />
 
