@@ -12,6 +12,8 @@ object FirebaseManager {
     private var iconCacheRepository: IconCacheRepository? = null
     private var authRepository: AuthRepository? = null
     private var taskRepository: TaskRepository? = null
+    private var environmentRepository: EnvironmentRepository? = null
+    private var projectRepository: ProjectRepository? = null
     
     // Repositorios
     val firestoreRepository by lazy { FirestoreRepository() }
@@ -45,6 +47,26 @@ object FirebaseManager {
             taskRepository = TaskRepository()
         }
         return taskRepository!!
+    }
+    
+    /**
+     * Obtiene la instancia del repositorio de ambientes
+     */
+    fun getEnvironmentRepository(): EnvironmentRepository {
+        if (environmentRepository == null) {
+            environmentRepository = EnvironmentRepository()
+        }
+        return environmentRepository!!
+    }
+    
+    /**
+     * Obtiene la instancia del repositorio de proyectos
+     */
+    fun getProjectRepository(): ProjectRepository {
+        if (projectRepository == null) {
+            projectRepository = ProjectRepository()
+        }
+        return projectRepository!!
     }
     
     /**

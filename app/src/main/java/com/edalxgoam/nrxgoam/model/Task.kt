@@ -1,6 +1,9 @@
 package com.edalxgoam.nrxgoam.model
 
+import com.google.firebase.firestore.DocumentId
+
 data class Task(
+    @DocumentId
     val id: String = "",
     val userId: String = "",
     val name: String = "",

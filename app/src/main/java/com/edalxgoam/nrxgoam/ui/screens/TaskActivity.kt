@@ -32,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.edalxgoam.nrxgoam.R
 import com.edalxgoam.nrxgoam.model.Task
+import com.edalxgoam.nrxgoam.model.Environment
+import com.edalxgoam.nrxgoam.model.Project
+import com.edalxgoam.nrxgoam.model.TaskWithDetails
 import com.edalxgoam.nrxgoam.model.TaskUtils.getStatusDisplayName
 import com.edalxgoam.nrxgoam.model.TaskUtils.getPriorityDisplayName
 import com.edalxgoam.nrxgoam.model.TaskUtils.toPriorityColor
@@ -162,11 +165,16 @@ fun TaskScreen(
     // Repositorios
     val authRepo = remember { FirebaseManager.getAuthRepository(context) }
     val taskRepo = remember { FirebaseManager.getTaskRepository() }
+    val environmentRepo = remember { FirebaseManager.getEnvironmentRepository() }
+    val projectRepo = remember { FirebaseManager.getProjectRepository() }
     
     // Estados
     var currentUser by remember { mutableStateOf<UserInfo?>(null) }
     var isAuthenticated by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf<List<Task>>(emptyList()) }
+    var environments by remember { mutableStateOf<List<Environment>>(emptyList()) }
+    var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
+    var tasksWithDetails by remember { mutableStateOf<List<TaskWithDetails>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isOrderDescending by remember { mutableStateOf(loadOrderPreference(context)) } // Cargar desde cache
@@ -174,6 +182,46 @@ fun TaskScreen(
     
     // Variable mutable para el callback de carga de tareas
     var loadTasksCallback: (() -> Unit)? by remember { mutableStateOf(null) }
+    
+    // Función para combinar tareas con información de proyecto y ambiente
+    val combineTasksWithDetails = remember {
+        {
+            println("DEBUG: Combining tasks with details")
+            println("DEBUG: Tasks count: ${tasks.size}")
+            println("DEBUG: Projects count: ${projects.size}")
+            println("DEBUG: Environments count: ${environments.size}")
+            
+            tasksWithDetails = tasks.map { task ->
+                println("DEBUG: Processing task '${task.name}' with project ID: '${task.project}', environment ID: '${task.environment}'")
+                
+                val project = if (task.project.isNotEmpty()) {
+                    val foundProject = projects.find { it.id == task.project }
+                    println("DEBUG: Found project for ID '${task.project}': ${foundProject?.name ?: "NOT FOUND"}")
+                    foundProject
+                } else null
+                
+                val environment = if (task.environment.isNotEmpty()) {
+                    val foundEnv = environments.find { it.id == task.environment }
+                    println("DEBUG: Found environment for ID '${task.environment}': ${foundEnv?.name ?: "NOT FOUND"}")
+                    foundEnv
+                } else {
+                    // Si la tarea no tiene ambiente directo, intentar obtenerlo desde el proyecto
+                    project?.let { proj ->
+                        val envFromProject = environments.find { it.id == proj.environment }
+                        println("DEBUG: Found environment from project: ${envFromProject?.name ?: "NOT FOUND"}")
+                        envFromProject
+                    }
+                }
+                
+                TaskWithDetails(
+                    task = task,
+                    project = project,
+                    environment = environment
+                )
+            }
+            println("DEBUG: Combined ${tasksWithDetails.size} tasks with details")
+        }
+    }
     
     // Launcher para Google Sign-In
     val signInLauncher = rememberLauncherForActivityResult(
@@ -217,77 +265,169 @@ fun TaskScreen(
         }
     }
     
-    // Función para cargar tareas manualmente (fallback cuando tiempo real falla)
-    fun loadUserTasksManually() {
-        val userId = authRepo.getCurrentUserId()
-        if (userId != null) {
-            scope.launch {
-                isLoading = true
-                val result = taskRepo.getActiveTasks(userId, isOrderDescending)
-                isLoading = false
-                
-                if (result.isSuccess) {
-                    tasks = result.getOrNull() ?: emptyList()
-                    errorMessage = null
-                } else {
-                    errorMessage = "Error al cargar tareas: ${result.exceptionOrNull()?.message}"
+    // Función para cargar ambientes y proyectos
+    val loadEnvironmentsAndProjects = remember {
+        {
+            val userId = authRepo.getCurrentUserId()
+            println("DEBUG: Loading environments and projects for user: $userId")
+            if (userId != null) {
+                scope.launch {
+                    // Cargar ambientes
+                    println("DEBUG: Loading environments...")
+                    val envResult = environmentRepo.getUserEnvironments(userId)
+                    if (envResult.isSuccess) {
+                        environments = envResult.getOrNull() ?: emptyList()
+                        println("DEBUG: Loaded ${environments.size} environments:")
+                        environments.forEach { env ->
+                            println("DEBUG: Environment - ID: ${env.id}, Name: ${env.name}")
+                        }
+                        if (environments.isEmpty()) {
+                            println("DEBUG: No environments found, creating default environment")
+                            val defaultEnv = Environment(
+                                id = "default",
+                                userId = userId,
+                                name = "Default Environment",
+                                color = "#2196F3"
+                            )
+                            environmentRepo.createEnvironment(defaultEnv)
+                        }
+                    } else {
+                        println("ERROR: Failed to load environments: ${envResult.exceptionOrNull()?.message}")
+                    }
+                    
+                    // Cargar proyectos
+                    println("DEBUG: Loading projects...")
+                    val projResult = projectRepo.getUserProjects(userId)
+                    if (projResult.isSuccess) {
+                        projects = projResult.getOrNull() ?: emptyList()
+                        println("DEBUG: Loaded ${projects.size} projects:")
+                        projects.forEach { proj ->
+                            println("DEBUG: Project - ID: ${proj.id}, Name: ${proj.name}, Environment: ${proj.environment}")
+                        }
+                    } else {
+                        println("ERROR: Failed to load projects: ${projResult.exceptionOrNull()?.message}")
+                    }
+                    
+                    // Combinar tareas con detalles
+                    combineTasksWithDetails()
                 }
             }
+            Unit
+        }
+    }
+    
+    // Función para cargar tareas manualmente (fallback cuando tiempo real falla)
+    val loadUserTasksManually = remember {
+        {
+            val userId = authRepo.getCurrentUserId()
+            if (userId != null) {
+                scope.launch {
+                    isLoading = true
+                    val result = taskRepo.getActiveTasks(userId, isOrderDescending)
+                    isLoading = false
+                    
+                    if (result.isSuccess) {
+                        tasks = result.getOrNull() ?: emptyList()
+                        combineTasksWithDetails() // Actualizar detalles
+                        errorMessage = null
+                    } else {
+                        errorMessage = "Error al cargar tareas: ${result.exceptionOrNull()?.message}"
+                    }
+                }
+            }
+            Unit
         }
     }
     
     // Función para refrescar tareas manualmente (solo cambia el estado para forzar recomposición)
-    fun refreshTasks() {
-        scope.launch {
-            isLoading = true
-            // Simular pequeña demora para mostrar el loading
-            kotlinx.coroutines.delay(500)
-            
-            if (isRealtimeEnabled) {
-                // En modo tiempo real, solo mostrar que se está refrescando
-                isLoading = false
-            } else {
-                // En modo manual, recargar datos
-                loadUserTasksManually()
+    val refreshTasks = remember {
+        {
+            scope.launch {
+                isLoading = true
+                // Simular pequeña demora para mostrar el loading
+                kotlinx.coroutines.delay(500)
+                
+                if (isRealtimeEnabled) {
+                    // En modo tiempo real, solo mostrar que se está refrescando
+                    isLoading = false
+                } else {
+                    // En modo manual, recargar datos
+                    loadUserTasksManually()
+                }
             }
+            Unit
         }
     }
     
     // Función para ordenar las tareas en memoria
-    fun sortTasks(taskList: List<Task>, descending: Boolean): List<Task> {
-        val comparator = compareByDescending<Task> { task ->
-            // Priorizar tareas con fecha de inicio
-            if (task.start.isNotEmpty()) {
-                try {
-                    // Normalizar formato de fecha para comparación
-                    val normalizedStart = when {
-                        task.start.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) -> "${task.start}:00Z"
-                        task.start.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}")) -> "${task.start}Z"
-                        else -> task.start
+    val sortTasks = remember {
+        { taskList: List<Task>, descending: Boolean ->
+            val comparator = compareByDescending<Task> { task ->
+                // Priorizar tareas con fecha de inicio
+                if (task.start.isNotEmpty()) {
+                    try {
+                        // Normalizar formato de fecha para comparación
+                        val normalizedStart = when {
+                            task.start.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) -> "${task.start}:00Z"
+                            task.start.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}")) -> "${task.start}Z"
+                            else -> task.start
+                        }
+                        java.time.Instant.parse(normalizedStart)
+                    } catch (e: Exception) {
+                        // Si falla el parsing, usar fecha de creación
+                        try {
+                            java.time.Instant.parse(task.createdAt)
+                        } catch (e2: Exception) {
+                            java.time.Instant.EPOCH
+                        }
                     }
-                    java.time.Instant.parse(normalizedStart)
-                } catch (e: Exception) {
-                    // Si falla el parsing, usar fecha de creación
+                } else {
+                    // Si no tiene fecha de inicio, usar fecha de creación
                     try {
                         java.time.Instant.parse(task.createdAt)
-                    } catch (e2: Exception) {
+                    } catch (e: Exception) {
                         java.time.Instant.EPOCH
                     }
                 }
+            }
+            
+            if (descending) {
+                taskList.sortedWith(comparator)
             } else {
-                // Si no tiene fecha de inicio, usar fecha de creación
-                try {
-                    java.time.Instant.parse(task.createdAt)
-                } catch (e: Exception) {
-                    java.time.Instant.EPOCH
-                }
+                taskList.sortedWith(comparator.reversed())
             }
         }
-        
-        return if (descending) {
-            taskList.sortedWith(comparator)
-        } else {
-            taskList.sortedWith(comparator.reversed())
+    }
+    
+    // Función para iniciar sesión con Google
+    val signInWithGoogle = remember {
+        {
+            try {
+                val signInIntent = authRepo.getSignInIntent()
+                signInLauncher.launch(signInIntent)
+            } catch (e: Exception) {
+                errorMessage = "Error al iniciar Google Sign-In: ${e.message}"
+            }
+            Unit
+        }
+    }
+    
+    // Función para cerrar sesión
+    val signOut = remember {
+        {
+            scope.launch {
+                val result = authRepo.signOut()
+                if (result.isSuccess) {
+                    currentUser = null
+                    isAuthenticated = false
+                    tasks = emptyList()
+                    tasksWithDetails = emptyList()
+                    errorMessage = null
+                } else {
+                    errorMessage = "Error al cerrar sesión: ${result.exceptionOrNull()?.message}"
+                }
+            }
+            Unit
         }
     }
     
@@ -314,6 +454,7 @@ fun TaskScreen(
                         
                         // Aplicar ordenamiento según preferencia
                         tasks = sortTasks(taskList, isOrderDescending)
+                        combineTasksWithDetails() // Actualizar detalles
                         isLoading = false
                         errorMessage = null
                     }
@@ -328,7 +469,26 @@ fun TaskScreen(
             loadUserTasksManually()
         } else {
             tasks = emptyList()
+            tasksWithDetails = emptyList()
             isLoading = false
+        }
+    }
+    
+    // Efecto para cargar ambientes y proyectos cuando el usuario se autentique
+    LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated) {
+            loadEnvironmentsAndProjects()
+        } else {
+            environments = emptyList()
+            projects = emptyList()
+            tasksWithDetails = emptyList()
+        }
+    }
+    
+    // Efecto para combinar tareas con detalles cuando cambien las tareas
+    LaunchedEffect(tasks, projects, environments) {
+        if (tasks.isNotEmpty() && (projects.isNotEmpty() || environments.isNotEmpty())) {
+            combineTasksWithDetails()
         }
     }
     
@@ -342,31 +502,7 @@ fun TaskScreen(
     LaunchedEffect(isOrderDescending) {
         if (tasks.isNotEmpty()) {
             tasks = sortTasks(tasks, isOrderDescending)
-        }
-    }
-    
-    // Función para iniciar sesión con Google
-    fun signInWithGoogle() {
-        try {
-            val signInIntent = authRepo.getSignInIntent()
-            signInLauncher.launch(signInIntent)
-        } catch (e: Exception) {
-            errorMessage = "Error al iniciar Google Sign-In: ${e.message}"
-        }
-    }
-    
-    // Función para cerrar sesión
-    fun signOut() {
-        scope.launch {
-            val result = authRepo.signOut()
-            if (result.isSuccess) {
-                currentUser = null
-                isAuthenticated = false
-                tasks = emptyList()
-                errorMessage = null
-            } else {
-                errorMessage = "Error al cerrar sesión: ${result.exceptionOrNull()?.message}"
-            }
+            combineTasksWithDetails() // Actualizar detalles después de reordenar
         }
     }
     
@@ -400,10 +536,10 @@ fun TaskScreen(
                                 tint = if (isOrderDescending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        IconButton(onClick = { refreshTasks() }) {
+                        IconButton(onClick = refreshTasks) {
                             Icon(Icons.Default.Refresh, contentDescription = "Actualizar")
                         }
-                        IconButton(onClick = { signOut() }) {
+                        IconButton(onClick = signOut) {
                             Icon(Icons.Default.ExitToApp, contentDescription = "Cerrar sesión")
                         }
                     }
@@ -425,7 +561,7 @@ fun TaskScreen(
                 
                 !isAuthenticated -> {
                     AuthenticationScreen(
-                        onSignInClick = { signInWithGoogle() },
+                        onSignInClick = signInWithGoogle,
                         errorMessage = errorMessage
                     )
                 }
@@ -433,8 +569,8 @@ fun TaskScreen(
                 else -> {
                     TaskListScreen(
                         user = currentUser,
-                        tasks = tasks,
-                        onRefresh = { refreshTasks() },
+                        tasksWithDetails = tasksWithDetails,
+                        onRefresh = refreshTasks,
                         errorMessage = errorMessage,
                         isRealtimeEnabled = isRealtimeEnabled
                     )
@@ -513,7 +649,7 @@ fun AuthenticationScreen(
 @Composable
 fun TaskListScreen(
     user: UserInfo?,
-    tasks: List<Task>,
+    tasksWithDetails: List<TaskWithDetails>,
     onRefresh: () -> Unit,
     errorMessage: String?,
     isRealtimeEnabled: Boolean
@@ -598,7 +734,7 @@ fun TaskListScreen(
         }
         
         // Lista de tareas
-        if (tasks.isEmpty()) {
+        if (tasksWithDetails.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -625,8 +761,8 @@ fun TaskListScreen(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(tasks) { task ->
-                    TaskItem(task = task)
+                items(tasksWithDetails) { taskWithDetails ->
+                    TaskItem(taskWithDetails = taskWithDetails)
                 }
             }
         }
@@ -634,7 +770,7 @@ fun TaskListScreen(
 }
 
 @Composable
-fun TaskItem(task: Task) {
+fun TaskItem(taskWithDetails: TaskWithDetails) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -657,23 +793,23 @@ fun TaskItem(task: Task) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = task.emoji.ifEmpty { "📝" },
+                        text = taskWithDetails.task.emoji.ifEmpty { "📝" },
                         fontSize = 24.sp,
                         modifier = Modifier.padding(end = 8.dp)
                     )
                     
                     Column {
                         Text(
-                            text = task.name,
+                            text = taskWithDetails.task.name,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         
-                        if (task.description.isNotEmpty()) {
+                        if (taskWithDetails.task.description.isNotEmpty()) {
                             Text(
-                                text = task.description,
+                                text = taskWithDetails.task.description,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2,
@@ -689,13 +825,13 @@ fun TaskItem(task: Task) {
                     modifier = Modifier
                         .padding(start = 8.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(task.toPriorityColor().copy(alpha = 0.1f))
+                        .background(taskWithDetails.task.toPriorityColor().copy(alpha = 0.1f))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = task.getPriorityDisplayName(),
+                        text = taskWithDetails.task.getPriorityDisplayName(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = task.toPriorityColor(),
+                        color = taskWithDetails.task.toPriorityColor(),
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -719,14 +855,14 @@ fun TaskItem(task: Task) {
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Creada: ${getRelativeTime(task.createdAt)}",
+                        text = "Creada: ${getRelativeTime(taskWithDetails.task.createdAt)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 
                 // Fecha de vencimiento (si existe)
-                if (!task.deadline.isNullOrEmpty()) {
+                if (!taskWithDetails.task.deadline.isNullOrEmpty()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -738,7 +874,7 @@ fun TaskItem(task: Task) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Vence: ${formatDateFromISO(task.deadline)}",
+                            text = "Vence: ${formatDateFromISO(taskWithDetails.task.deadline)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFFF6B35),
                             fontWeight = FontWeight.Medium
@@ -747,7 +883,7 @@ fun TaskItem(task: Task) {
                 }
                 
                 // Fechas de inicio y fin (si existen)
-                if (task.start.isNotEmpty() || task.end.isNotEmpty()) {
+                if (taskWithDetails.task.start.isNotEmpty() || taskWithDetails.task.end.isNotEmpty()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -760,12 +896,12 @@ fun TaskItem(task: Task) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = buildString {
-                                if (task.start.isNotEmpty()) {
-                                    append("Inicio: ${formatDateFromISO(task.start)}")
+                                if (taskWithDetails.task.start.isNotEmpty()) {
+                                    append("Inicio: ${formatDateFromISO(taskWithDetails.task.start)}")
                                 }
-                                if (task.end.isNotEmpty()) {
-                                    if (task.start.isNotEmpty()) append(" • ")
-                                    append("Fin: ${formatDateFromISO(task.end)}")
+                                if (taskWithDetails.task.end.isNotEmpty()) {
+                                    if (taskWithDetails.task.start.isNotEmpty()) append(" • ")
+                                    append("Fin: ${formatDateFromISO(taskWithDetails.task.end)}")
                                 }
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -777,7 +913,7 @@ fun TaskItem(task: Task) {
                 }
                 
                 // Fecha de completado (si está completada)
-                if (task.completed && !task.completedAt.isNullOrEmpty()) {
+                if (taskWithDetails.task.completed && !taskWithDetails.task.completedAt.isNullOrEmpty()) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -789,7 +925,7 @@ fun TaskItem(task: Task) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Completada: ${getRelativeTime(task.completedAt)}",
+                            text = "Completada: ${getRelativeTime(taskWithDetails.task.completedAt)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Green,
                             fontWeight = FontWeight.Medium
@@ -807,35 +943,99 @@ fun TaskItem(task: Task) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Estado con color
-                val statusColor = when (task.status) {
+                val statusColor = when (taskWithDetails.task.status) {
                     "completed" -> Color.Green
                     "in-progress" -> Color(0xFFFF9800)
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
                 
                 Text(
-                    text = "Estado: ${task.getStatusDisplayName()}",
+                    text = "Estado: ${taskWithDetails.task.getStatusDisplayName()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = statusColor,
-                    fontWeight = if (task.status != "pending") FontWeight.Medium else FontWeight.Normal
+                    fontWeight = if (taskWithDetails.task.status != "pending") FontWeight.Medium else FontWeight.Normal
                 )
+            }
+            
+            // Nueva sección para ambiente y proyecto
+            if (taskWithDetails.hasCompleteHierarchy() || taskWithDetails.project != null || taskWithDetails.environment != null) {
+                Spacer(modifier = Modifier.height(8.dp))
                 
-                // Proyecto (si existe)
-                if (task.project.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Mostrar ambiente si existe
+                    taskWithDetails.environment?.let { environment ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(taskWithDetails.getEnvironmentColor())
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "🌐 ${environment.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    
+                    // Mostrar proyecto si existe
+                    taskWithDetails.project?.let { project ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(taskWithDetails.getProjectColor())
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "📁 ${project.name}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    
+                    // Mostrar jerarquía completa si ambos existen
+                    if (taskWithDetails.hasCompleteHierarchy()) {
                         Text(
-                            text = "📁 ${task.project}",
+                            text = "📍 ${taskWithDetails.getHierarchyDescription()}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+            } else if (taskWithDetails.task.project.isNotEmpty()) {
+                // Fallback: mostrar el ID del proyecto si no se encontró información
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "📁 ${taskWithDetails.task.project}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
