@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.edalxgoam.nrxgoam.data.Alarm
 import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
 import java.util.*
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun AlarmScreen(
@@ -54,12 +55,14 @@ fun AlarmScreen(
             modifier = Modifier.padding(bottom = 16.dp)
         )
         
+        val upcomingAlarms = remember(alarms) { alarms.filter { it.date.after(Date()) } }
+        
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            items(alarms) { alarm ->
+            items(upcomingAlarms) { alarm ->
                 AlarmItem(
                     alarm = alarm,
                     onDelete = { onDeleteAlarm(alarm.id) },
@@ -208,10 +211,16 @@ fun AlarmItem(
     onEdit: () -> Unit,
     onDuplicate: () -> Unit
 ) {
+    val isReminder = alarm.category == "Recordatorio"
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isReminder)
+                Color(0xFFA5D6A7) // verde claro para recordatorios
+            else MaterialTheme.colorScheme.surface
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(

@@ -48,6 +48,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import com.edalxgoam.nrxgoam.AlarmReceiver
 
 // Función utilitaria para formatear fechas
 fun formatDateFromISO(isoString: String): String {
@@ -506,6 +510,47 @@ fun TaskScreen(
         }
     }
     
+    // Efecto para programar alarmas en las fechas de reminders de las tareas
+    LaunchedEffect(tasks) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        tasks.forEachIndexed { taskIndex, task ->
+            task.reminders.forEachIndexed { reminderIndex, reminderIso ->
+                try {
+                    // Parsear ISO a Instant
+                    val instant = when {
+                        reminderIso.contains("Z") || reminderIso.contains("+") -> Instant.parse(reminderIso)
+                        reminderIso.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) -> Instant.parse("$reminderIso:00Z")
+                        reminderIso.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}")) -> Instant.parse("${reminderIso}Z")
+                        else -> Instant.parse(reminderIso)
+                    }
+                    val triggerAtMillis = instant.toEpochMilli()
+                    if (triggerAtMillis > System.currentTimeMillis()) {
+                        val requestCode = task.id.hashCode() + reminderIndex
+                        val intent = Intent(context, AlarmReceiver::class.java).apply {
+                            putExtra("alarm_id", requestCode.toLong())
+                            putExtra("alarm_title", task.name)
+                            putExtra("alarm_description", task.description)
+                            putExtra("alarm_category", "Recordatorio")
+                        }
+                        val pendingIntent = PendingIntent.getBroadcast(
+                            context,
+                            requestCode,
+                            intent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+                        alarmManager.setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP,
+                            triggerAtMillis,
+                            pendingIntent
+                        )
+                    }
+                } catch (e: Exception) {
+                    println("Error programando reminder: $reminderIso - ${e.message}")
+                }
+            }
+        }
+    }
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -765,6 +810,17 @@ fun TaskListScreen(
                     TaskItem(taskWithDetails = taskWithDetails)
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Recordatorios descargados:",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            Text(
+                text = tasksWithDetails.flatMap { it.task.reminders }.joinToString(", "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -1036,6 +1092,26 @@ fun TaskItem(taskWithDetails: TaskWithDetails) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+            // Mostrar recordatorios de esta tarea
+            if (taskWithDetails.task.reminders.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Recordatorios:",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    taskWithDetails.task.reminders.forEach { reminderIso ->
+                        Text(
+                            text = formatDateFromISO(reminderIso),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
