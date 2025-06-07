@@ -99,6 +99,7 @@ class AlarmActivity : ComponentActivity() {
                                         title = task.name,
                                         description = task.description,
                                         category = "Recordatorio",
+                                        ringtoneUri = null,
                                         date = Date.from(instant)
                                     )
                                 }
@@ -114,8 +115,8 @@ class AlarmActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         onStartMusic = { startMusicService() },
                         onStopMusic = { stopMusicService() },
-                        onSetAlarm = { title, description, category, date -> 
-                            scheduleAlarm(title, description, category, date)
+                        onSetAlarm = { title, description, category, date, ringtoneUri -> 
+                            scheduleAlarm(title, description, category, date, ringtoneUri)
                             alarms = alarmRepository.getAllAlarms()
                         },
                         onDeleteAlarm = { alarmId -> 
@@ -130,6 +131,10 @@ class AlarmActivity : ComponentActivity() {
                             duplicateAlarm(alarm)
                             alarms = alarmRepository.getAllAlarms()
                         },
+                        onChangeRingtone = { alarm, ringtoneUri ->
+                            editAlarm(alarm.copy(ringtoneUri = ringtoneUri))
+                            alarms = alarmRepository.getAllAlarms()
+                        },
                         alarms = allAlarms
                     )
                 }
@@ -137,11 +142,12 @@ class AlarmActivity : ComponentActivity() {
         }
     }
 
-    private fun scheduleAlarm(title: String, description: String, category: String, date: Date) {
+    private fun scheduleAlarm(title: String, description: String, category: String, date: Date, ringtoneUri: String?) {
         val alarm = Alarm(
             title = title,
             description = description,
             category = category,
+            ringtoneUri = ringtoneUri,
             date = date
         )
         alarmRepository.saveAlarm(alarm)
@@ -152,6 +158,7 @@ class AlarmActivity : ComponentActivity() {
             putExtra("alarm_title", alarm.title)
             putExtra("alarm_description", alarm.description)
             putExtra("alarm_category", alarm.category)
+            putExtra("alarm_ringtone", ringtoneUri)
         }
         
         val pendingIntent = PendingIntent.getBroadcast(
@@ -208,6 +215,7 @@ class AlarmActivity : ComponentActivity() {
             putExtra("alarm_title", newAlarm.title)
             putExtra("alarm_description", newAlarm.description)
             putExtra("alarm_category", newAlarm.category)
+            putExtra("alarm_ringtone", newAlarm.ringtoneUri)
         }
         
         val newPendingIntent = PendingIntent.getBroadcast(
@@ -241,6 +249,7 @@ class AlarmActivity : ComponentActivity() {
             putExtra("alarm_title", newAlarm.title)
             putExtra("alarm_description", newAlarm.description)
             putExtra("alarm_category", newAlarm.category)
+            putExtra("alarm_ringtone", newAlarm.ringtoneUri)
         }
         
         val pendingIntent = PendingIntent.getBroadcast(

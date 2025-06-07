@@ -7,6 +7,7 @@ data class Alarm(
     val title: String,
     val description: String,
     val category: String,
+    val ringtoneUri: String? = null,
     val date: Date,
     val isEnabled: Boolean = true,
     val createdAt: Date = Date()

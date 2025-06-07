@@ -23,6 +23,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 putExtra("alarm_title", intent.getStringExtra("alarm_title"))
                 putExtra("alarm_description", intent.getStringExtra("alarm_description"))
                 putExtra("alarm_category", intent.getStringExtra("alarm_category"))
+                putExtra("alarm_ringtone", intent.getStringExtra("alarm_ringtone"))
             }
             ContextCompat.startForegroundService(context, serviceIntent)
 

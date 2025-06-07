@@ -20,16 +20,24 @@ import com.edalxgoam.nrxgoam.data.Alarm
 import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
 import java.util.*
 import androidx.compose.ui.graphics.Color
+import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.res.painterResource
+import com.edalxgoam.nrxgoam.R
 
 @Composable
 fun AlarmScreen(
     modifier: Modifier = Modifier,
     onStartMusic: () -> Unit,
     onStopMusic: () -> Unit,
-    onSetAlarm: (String, String, String, Date) -> Unit,
+    onSetAlarm: (String, String, String, Date, String?) -> Unit,
     onDeleteAlarm: (Long) -> Unit,
     onEditAlarm: (Alarm) -> Unit,
     onDuplicateAlarm: (Alarm) -> Unit,
+    onChangeRingtone: (Alarm, String?) -> Unit,
     alarms: List<Alarm>
 ) {
     var isMusicPlaying by remember { mutableStateOf(false) }
@@ -39,9 +47,16 @@ fun AlarmScreen(
     var category by remember { mutableStateOf("") }
     var selectedDate by remember { mutableStateOf(Date()) }
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
+    var selectedRingtoneUri by remember { mutableStateOf<String?>(null) }
     
     val context = LocalContext.current
     val calendar = Calendar.getInstance()
+    val ringtoneLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            selectedRingtoneUri = uri?.toString()
+        }
+    }
     
     Column(
         modifier = modifier
@@ -55,7 +70,7 @@ fun AlarmScreen(
             modifier = Modifier.padding(bottom = 16.dp)
         )
         
-        val upcomingAlarms = remember(alarms) { alarms.filter { it.date.after(Date()) } }
+        val upcomingAlarms = remember(alarms) { alarms.filter { it.date.after(Date()) }.sortedBy { it.date } }
         
         LazyColumn(
             modifier = Modifier
@@ -72,9 +87,11 @@ fun AlarmScreen(
                         description = alarm.description
                         category = alarm.category
                         selectedDate = alarm.date
+                        selectedRingtoneUri = alarm.ringtoneUri
                         showDialog = true
                     },
-                    onDuplicate = { onDuplicateAlarm(alarm) }
+                    onDuplicate = { onDuplicateAlarm(alarm) },
+                    onChangeRingtone = { newUri -> onChangeRingtone(alarm, newUri) }
                 )
             }
         }
@@ -165,6 +182,35 @@ fun AlarmScreen(
                     ) {
                         Text("Seleccionar fecha y hora")
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Selecciona un sonido")
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                                putExtra(
+                                    RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                                    selectedRingtoneUri?.let { Uri.parse(it) }
+                                )
+                            }
+                            ringtoneLauncher.launch(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            selectedRingtoneUri?.let {
+                                RingtoneManager.getRingtone(context, Uri.parse(it)).getTitle(context)
+                            } ?: "Seleccionar sonido de alarma"
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { selectedRingtoneUri = null },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Restablecer sonido predeterminado")
+                    }
                 }
             },
             confirmButton = {
@@ -176,14 +222,16 @@ fun AlarmScreen(
                                     title = title,
                                     description = description,
                                     category = category,
+                                    ringtoneUri = selectedRingtoneUri,
                                     date = selectedDate
                                 ))
                             } else {
-                                onSetAlarm(title, description, category, selectedDate)
+                                onSetAlarm(title, description, category, selectedDate, selectedRingtoneUri)
                             }
                             title = ""
                             description = ""
                             category = ""
+                            selectedRingtoneUri = null
                             showDialog = false
                             editingAlarm = null
                         }
@@ -209,9 +257,19 @@ fun AlarmItem(
     alarm: Alarm,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
-    onDuplicate: () -> Unit
+    onDuplicate: () -> Unit,
+    onChangeRingtone: (String?) -> Unit
 ) {
     val isReminder = alarm.category == "Recordatorio"
+    val context = LocalContext.current
+    var localRingtoneUri by remember(alarm.ringtoneUri) { mutableStateOf(alarm.ringtoneUri) }
+    val ringtoneLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            localRingtoneUri = uri?.toString()
+            onChangeRingtone(localRingtoneUri)
+        }
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,13 +296,13 @@ fun AlarmItem(
                     style = MaterialTheme.typography.titleLarge
                 )
                 Row {
-                    TextButton(onClick = onDuplicate) {
+                    TextButton(onClick = { onDuplicate() }) {
                         Text("Clonar")
                     }
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Default.Edit, contentDescription = "Editar alarma")
                     }
-                    IconButton(onClick = onDelete) {
+                    IconButton(onClick = { onDelete() }) {
                         Icon(Icons.Default.Delete, contentDescription = "Eliminar alarma")
                     }
                 }
@@ -265,6 +323,28 @@ fun AlarmItem(
                 Text(
                     text = alarm.category,
                     style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Selecciona un sonido")
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                        putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, localRingtoneUri?.let { Uri.parse(it) })
+                    }
+                    ringtoneLauncher.launch(intent)
+                }) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.icon_alarm_placeholder),
+                        contentDescription = "Cambiar sonido"
+                    )
+                }
+                Text(
+                    text = localRingtoneUri?.let { RingtoneManager.getRingtone(context, Uri.parse(it)).getTitle(context) } ?: "Que suene",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -296,10 +376,11 @@ fun AlarmScreenPreview() {
         AlarmScreen(
             onStartMusic = {},
             onStopMusic = {},
-            onSetAlarm = { _, _, _, _ -> },
+            onSetAlarm = { _, _, _, _, _ -> },
             onDeleteAlarm = { _ -> },
             onEditAlarm = { _ -> },
             onDuplicateAlarm = { _ -> },
+            onChangeRingtone = { _, _ -> },
             alarms = emptyList()
         )
     }

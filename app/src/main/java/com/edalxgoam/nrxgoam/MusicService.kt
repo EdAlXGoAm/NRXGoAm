@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Intent
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -47,8 +49,29 @@ class MusicService : Service() {
     }
 
     private fun startMusic(intent: Intent) {
+        val ringtoneUriString = intent.getStringExtra("alarm_ringtone")
         if (mediaPlayer == null) {
-            initializeMediaPlayer()
+            if (!ringtoneUriString.isNullOrEmpty()) {
+                try {
+                    mediaPlayer = MediaPlayer().apply {
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                .build()
+                        )
+                        setDataSource(this@MusicService, Uri.parse(ringtoneUriString))
+                        isLooping = true
+                        prepare()
+                        start()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    initializeMediaPlayer()
+                }
+            } else {
+                initializeMediaPlayer()
+            }
         }
         
         val alarmId = intent.getLongExtra("alarm_id", -1)
