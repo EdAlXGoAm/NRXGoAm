@@ -19,7 +19,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -28,9 +32,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -43,7 +50,7 @@ import com.edalxgoam.nrxgoam.ui.components.PantryIconFromFirebase
 import com.edalxgoam.nrxgoam.ui.screens.AlarmActivity
 import com.edalxgoam.nrxgoam.ui.screens.PantryActivity
 import com.edalxgoam.nrxgoam.ui.screens.TaskActivity
-import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
+import com.edalxgoam.nrxgoam.ui.theme.*
 import java.util.*
 import kotlinx.coroutines.*
 
@@ -268,6 +275,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Data class para representar cada aplicación/módulo del menú
+data class AppMenuItem(
+    val title: String,
+    val description: String,
+    val headerColor: Color,
+    val buttonColor: Color,
+    val onClick: () -> Unit,
+    val enabled: Boolean = true,
+    val buttonText: String = "Abrir"
+)
+
 @Composable
 fun MainMenu(
     modifier: Modifier = Modifier,
@@ -275,46 +293,207 @@ fun MainMenu(
     onPantryClick: () -> Unit,
     onTaskClick: () -> Unit
 ) {
+    val menuItems = listOf(
+        AppMenuItem(
+            title = "Alarmas",
+            description = "Programa recordatorios y alarmas para no olvidar nada importante.",
+            headerColor = CardBlue,
+            buttonColor = CardBlue,
+            onClick = onAlarmClick
+        ),
+        AppMenuItem(
+            title = "Despensa",
+            description = "Gestiona tu inventario de alimentos y productos del hogar.",
+            headerColor = CardYellow,
+            buttonColor = CardYellow,
+            onClick = onPantryClick
+        ),
+        AppMenuItem(
+            title = "Tareas",
+            description = "Organiza tus tareas diarias y proyectos de manera eficiente.",
+            headerColor = CardTeal,
+            buttonColor = CardTeal,
+            onClick = onTaskClick
+        ),
+        AppMenuItem(
+            title = "Finanzas",
+            description = "Próximamente: Gestiona tus finanzas personales.",
+            headerColor = CardGreen,
+            buttonColor = CardGreen,
+            onClick = {},
+            enabled = false,
+            buttonText = "Próximamente"
+        ),
+        AppMenuItem(
+            title = "Notas",
+            description = "Próximamente: Toma notas y guarda información importante.",
+            headerColor = CardPurple,
+            buttonColor = CardPurple,
+            onClick = {},
+            enabled = false,
+            buttonText = "Próximamente"
+        ),
+        AppMenuItem(
+            title = "Configuración",
+            description = "Próximamente: Personaliza la app a tu gusto.",
+            headerColor = CardGray,
+            buttonColor = CardGray,
+            onClick = {},
+            enabled = false,
+            buttonText = "Próximamente"
+        )
+    )
+    
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFFF8FAFC),
+                        Color(0xFFE2E8F0)
+                    )
+                )
+            )
+            .padding(16.dp)
     ) {
-        Text(
-            text = "Menú Principal",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
+        // Header de bienvenida
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            FirebaseMenuIcon(
-                label = "Alarma",
-                iconType = FirebaseIconType.ALARM,
-                onClick = onAlarmClick
+            Text(
+                text = "Bienvenido 👋",
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = Color(0xFF1E293B)
             )
-            
-            FirebaseMenuIcon(
-                label = "Despensa",
-                iconType = FirebaseIconType.PANTRY,
-                onClick = onPantryClick
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Todas tus aplicaciones en un solo lugar",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color(0xFF64748B),
+                textAlign = TextAlign.Center
             )
-            
-            FirebaseMenuIcon(
-                label = "Tareas",
-                iconType = FirebaseIconType.TASK,
-                onClick = onTaskClick
-            )
-            
-            // Aquí puedes agregar más íconos de menú en el futuro
+        }
+        
+        // Grid de tarjetas
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(menuItems) { item ->
+                AppCard(
+                    title = item.title,
+                    description = item.description,
+                    headerColor = item.headerColor,
+                    buttonColor = item.buttonColor,
+                    onClick = item.onClick,
+                    enabled = item.enabled,
+                    buttonText = item.buttonText
+                )
+            }
         }
     }
 }
 
+@Composable
+fun AppCard(
+    title: String,
+    description: String,
+    headerColor: Color,
+    buttonColor: Color,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    buttonText: String = "Abrir"
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = headerColor.copy(alpha = 0.3f),
+                spotColor = headerColor.copy(alpha = 0.3f)
+            ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (!enabled) Modifier.background(Color.White.copy(alpha = 0.6f))
+                    else Modifier
+                )
+        ) {
+            // Header con color
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (enabled) headerColor else headerColor.copy(alpha = 0.5f)
+                    )
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = Color.White
+                )
+            }
+            
+            // Contenido
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (enabled) Color(0xFF64748B) else Color(0xFF94A3B8),
+                    modifier = Modifier.padding(bottom = 16.dp),
+                    minLines = 2,
+                    maxLines = 3
+                )
+                
+                // Botón
+                Button(
+                    onClick = onClick,
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = buttonColor,
+                        contentColor = Color.White,
+                        disabledContainerColor = Color(0xFFD1D5DB),
+                        disabledContentColor = Color(0xFF9CA3AF)
+                    )
+                ) {
+                    Text(
+                        text = buttonText,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Mantener los componentes legacy por compatibilidad
 enum class FirebaseIconType {
     ALARM,
     PANTRY,
@@ -355,7 +534,6 @@ fun FirebaseMenuIcon(
                     )
                 }
                 FirebaseIconType.TASK -> {
-                    // Usar el mismo ícono que Alarma para Tareas
                     AlarmIconFromFirebase(
                         modifier = Modifier.size(68.dp),
                         contentDescription = label
