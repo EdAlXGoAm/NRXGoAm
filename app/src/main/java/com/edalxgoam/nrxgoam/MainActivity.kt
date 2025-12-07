@@ -79,6 +79,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
             
+            // Iniciar sincronización automática de tareas cada 5 minutos
+            TaskSyncManager.startPeriodicSync(this)
+            
+            // Ejecutar sincronización inmediata al abrir la app
+            TaskSyncManager.triggerImmediateSync(this)
+            
         } catch (e: Exception) {
             println("Error al inicializar Firebase: ${e.message}")
             e.printStackTrace()

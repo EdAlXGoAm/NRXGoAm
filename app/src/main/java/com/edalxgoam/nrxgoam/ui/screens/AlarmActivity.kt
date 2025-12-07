@@ -35,6 +35,8 @@ import kotlinx.coroutines.cancel
 import java.time.Instant
 import com.edalxgoam.nrxgoam.repository.FirebaseManager
 import com.edalxgoam.nrxgoam.model.Task
+import com.edalxgoam.nrxgoam.model.Project
+import com.edalxgoam.nrxgoam.model.Environment
 
 class AlarmActivity : ComponentActivity() {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
@@ -77,10 +79,24 @@ class AlarmActivity : ComponentActivity() {
                 val taskRepo = remember { FirebaseManager.getTaskRepository() }
                 var alarms by remember { mutableStateOf(alarmRepository.getAllAlarms()) }
                 var reminderAlarms by remember { mutableStateOf<List<Alarm>>(emptyList()) }
+                val projectRepo = remember { FirebaseManager.getProjectRepository() }
+                val envRepo = remember { FirebaseManager.getEnvironmentRepository() }
+                var projects by remember { mutableStateOf<List<Project>>(emptyList()) }
+                var environments by remember { mutableStateOf<List<Environment>>(emptyList()) }
 
                 LaunchedEffect(authRepo) {
                     val userId = authRepo.getCurrentUserId()
                     if (userId != null) {
+                        // Cargar proyectos y entornos antes de mapear recordatorios
+                        val projectResult = projectRepo.getUserProjects(userId)
+                        if (projectResult.isSuccess) {
+                            projects = projectResult.getOrNull().orEmpty()
+                        }
+                        val envResult = envRepo.getUserEnvironments(userId)
+                        if (envResult.isSuccess) {
+                            environments = envResult.getOrNull().orEmpty()
+                        }
+                        // Cargar tareas y mapear recordatorios con categoría de proyecto
                         val result = taskRepo.getActiveTasks(userId, true)
                         if (result.isSuccess) {
                             val tasks = result.getOrNull().orEmpty()
@@ -89,18 +105,31 @@ class AlarmActivity : ComponentActivity() {
                                     val instant = Instant.parse(
                                         when {
                                             iso.contains("Z") || iso.contains("+") -> iso
-                                            iso.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) -> "$iso:00Z"
+                                            iso.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}")) -> "${iso}:00Z"
                                             iso.matches(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}")) -> "${iso}Z"
                                             else -> iso
                                         }
                                     )
+                                    // Determinar proyecto y entorno para la categoría
+                                    val project = projects.find { it.id == task.project }
+                                    val environment = if (task.environment.isNotEmpty()) {
+                                        environments.find { it.id == task.environment }
+                                    } else {
+                                        project?.let { proj -> environments.find { it.id == proj.environment } }
+                                    }
+                                    val categoryString = if (project != null && environment != null) {
+                                        "(Entorno: ${environment.name}) ${project.name}"
+                                    } else {
+                                        "Recordatorio"
+                                    }
                                     Alarm(
                                         id = task.id.hashCode().toLong() + index,
                                         title = task.name,
                                         description = task.description,
-                                        category = "Recordatorio",
+                                        category = categoryString,
                                         ringtoneUri = null,
-                                        date = Date.from(instant)
+                                        date = Date.from(instant),
+                                        isCloud = true
                                     )
                                 }
                             }
@@ -135,7 +164,9 @@ class AlarmActivity : ComponentActivity() {
                             editAlarm(alarm.copy(ringtoneUri = ringtoneUri))
                             alarms = alarmRepository.getAllAlarms()
                         },
-                        alarms = allAlarms
+                        alarms = allAlarms,
+                        projects = projects,
+                        environments = environments
                     )
                 }
             }

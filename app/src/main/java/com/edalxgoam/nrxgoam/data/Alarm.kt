@@ -10,5 +10,6 @@ data class Alarm(
     val ringtoneUri: String? = null,
     val date: Date,
     val isEnabled: Boolean = true,
-    val createdAt: Date = Date()
+    val createdAt: Date = Date(),
+    val isCloud: Boolean = false
 ) 

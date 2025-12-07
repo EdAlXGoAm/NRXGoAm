@@ -27,6 +27,38 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.res.painterResource
 import com.edalxgoam.nrxgoam.R
+import com.edalxgoam.nrxgoam.model.Project
+import com.edalxgoam.nrxgoam.model.Environment
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontWeight
+import com.edalxgoam.nrxgoam.model.EnvironmentUtils.toComposeColor
+import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
+import androidx.compose.ui.graphics.Brush
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardBackground_Offline
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardBackground_Cloud
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardBackground_Offline_Passed
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardBackground_Cloud_Passed
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardContrast_Offline
+import com.edalxgoam.nrxgoam.ui.theme.AlarmCardContrast_Cloud
+
+// Constantes para SharedPreferences del filtro de alarmas
+private const val ALARM_PREFS_NAME = "alarm_screen_preferences"
+private const val KEY_SHOW_HIDDEN = "show_hidden_alarms"
+
+// Función para guardar el estado del filtro
+private fun saveShowHiddenPreference(context: android.content.Context, showHidden: Boolean) {
+    val prefs = context.getSharedPreferences(ALARM_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    prefs.edit().putBoolean(KEY_SHOW_HIDDEN, showHidden).apply()
+}
+
+// Función para cargar el estado del filtro
+private fun loadShowHiddenPreference(context: android.content.Context): Boolean {
+    val prefs = context.getSharedPreferences(ALARM_PREFS_NAME, android.content.Context.MODE_PRIVATE)
+    return prefs.getBoolean(KEY_SHOW_HIDDEN, false) // Por defecto false (no mostrar ocultas)
+}
 
 @Composable
 fun AlarmScreen(
@@ -38,24 +70,43 @@ fun AlarmScreen(
     onEditAlarm: (Alarm) -> Unit,
     onDuplicateAlarm: (Alarm) -> Unit,
     onChangeRingtone: (Alarm, String?) -> Unit,
-    alarms: List<Alarm>
+    alarms: List<Alarm>,
+    projects: List<Project>,
+    environments: List<Environment>
 ) {
     var isMusicPlaying by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Alarma") }
     var selectedDate by remember { mutableStateOf(Date()) }
     var editingAlarm by remember { mutableStateOf<Alarm?>(null) }
     var selectedRingtoneUri by remember { mutableStateOf<String?>(null) }
     
     val context = LocalContext.current
+    var showHidden by remember { mutableStateOf(loadShowHiddenPreference(context)) }
+    val environmentsSorted = remember(environments) { environments.sortedBy { it.name } }
+    val projectsByEnv = remember(environmentsSorted, projects) {
+        environmentsSorted.associateWith { env ->
+            projects.filter { it.environment == env.id }.sortedBy { it.name }
+        }
+    }
+    var expandedCategory by remember { mutableStateOf(false) }
+    
     val calendar = Calendar.getInstance()
     val ringtoneLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val uri = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
             selectedRingtoneUri = uri?.toString()
         }
+    }
+    
+    val now = Date()
+    val displayedAlarms = remember(alarms, showHidden) {
+        alarms.filter { alarm ->
+            if (showHidden) true // Mostrar todas las alarmas (programadas + ocultas)
+            else alarm.date.after(now) // Solo mostrar alarmas futuras
+        }.sortedBy { it.date }
     }
     
     Column(
@@ -65,19 +116,34 @@ fun AlarmScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Alarmas Programadas",
+            text = if (showHidden) "Todas las Alarmas" else "Alarmas Programadas",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 16.dp)
         )
         
-        val upcomingAlarms = remember(alarms) { alarms.filter { it.date.after(Date()) }.sortedBy { it.date } }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        ) {
+            Text("Incluir alarmas ocultas")
+            Spacer(modifier = Modifier.weight(1f))
+            Switch(
+                checked = showHidden,
+                onCheckedChange = { newValue ->
+                    showHidden = newValue
+                    saveShowHiddenPreference(context, newValue)
+                }
+            )
+        }
         
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            items(upcomingAlarms) { alarm ->
+            items(displayedAlarms) { alarm ->
                 AlarmItem(
                     alarm = alarm,
                     onDelete = { onDeleteAlarm(alarm.id) },
@@ -101,7 +167,7 @@ fun AlarmScreen(
                 editingAlarm = null
                 title = ""
                 description = ""
-                category = ""
+                category = "Alarma"
                 selectedDate = Date()
                 showDialog = true 
             },
@@ -148,19 +214,107 @@ fun AlarmScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = category,
-                        onValueChange = { category = it },
-                        label = { Text("Categoría") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Text(text = "Categoría", style = MaterialTheme.typography.bodyMedium)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                    ) {
+                        Text(
+                            text = category,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedCategory = true }
+                                .padding(12.dp)
+                        )
+                        DropdownMenu(
+                            expanded = expandedCategory,
+                            onDismissRequest = { expandedCategory = false },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Alarma") },
+                                onClick = {
+                                    category = "Alarma"
+                                    expandedCategory = false
+                                }
+                            )
+                            Divider()
+                            environmentsSorted.forEach { env ->
+                                DropdownMenuItem(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(env.toComposeColor().copy(alpha = 0.2f)),
+                                    text = { Text("Entorno: ${env.name}", fontWeight = FontWeight.Bold) },
+                                    enabled = false,
+                                    onClick = { }
+                                )
+                                (projectsByEnv[env] ?: emptyList()).forEach { project ->
+                                    DropdownMenuItem(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(env.toComposeColor().copy(alpha = 0.1f)),
+                                        text = { Text(project.name) },
+                                        onClick = {
+                                            category = "(Entorno: ${env.name}) ${project.name}"
+                                            expandedCategory = false
+                                        }
+                                    )
+                                }
+                                Divider()
+                            }
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            DatePickerDialog(
-                                context,
-                                { _, year, month, day ->
-                                    calendar.set(year, month, day)
+                    Text(text = "Fecha y Hora", style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Previsualización de fecha clickeable
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    calendar.time = selectedDate
+                                    DatePickerDialog(
+                                        context,
+                                        { _, year, month, day ->
+                                            calendar.set(year, month, day)
+                                            selectedDate = calendar.time
+                                        },
+                                        calendar.get(Calendar.YEAR),
+                                        calendar.get(Calendar.MONTH),
+                                        calendar.get(Calendar.DAY_OF_MONTH)
+                                    ).show()
+                                },
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Fecha",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = formatDateOnly(selectedDate),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                        
+                        // Previsualización de hora clickeable
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    calendar.time = selectedDate
                                     TimePickerDialog(
                                         context,
                                         { _, hour, minute ->
@@ -173,14 +327,26 @@ fun AlarmScreen(
                                         false
                                     ).show()
                                 },
-                                calendar.get(Calendar.YEAR),
-                                calendar.get(Calendar.MONTH),
-                                calendar.get(Calendar.DAY_OF_MONTH)
-                            ).show()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Seleccionar fecha y hora")
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Hora",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = formatTimeOnly(selectedDate),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
@@ -216,7 +382,7 @@ fun AlarmScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (title.isNotBlank() && description.isNotBlank() && category.isNotBlank()) {
+                        if (title.isNotBlank() && category.isNotBlank()) {
                             if (editingAlarm != null) {
                                 onEditAlarm(editingAlarm!!.copy(
                                     title = title,
@@ -230,7 +396,7 @@ fun AlarmScreen(
                             }
                             title = ""
                             description = ""
-                            category = ""
+                            category = "Alarma"
                             selectedRingtoneUri = null
                             showDialog = false
                             editingAlarm = null
@@ -260,7 +426,8 @@ fun AlarmItem(
     onDuplicate: () -> Unit,
     onChangeRingtone: (String?) -> Unit
 ) {
-    val isReminder = alarm.category == "Recordatorio"
+    val isCloudAlarm = alarm.isCloud
+    val isPassed = alarm.date.before(Date()) // Verificar si la alarma ya pasó
     val context = LocalContext.current
     var localRingtoneUri by remember(alarm.ringtoneUri) { mutableStateOf(alarm.ringtoneUri) }
     val ringtoneLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -275,17 +442,35 @@ fun AlarmItem(
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isReminder)
-                Color(0xFFA5D6A7) // verde claro para recordatorios
-            else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                isCloudAlarm && isPassed -> AlarmCardBackground_Cloud_Passed
+                isCloudAlarm && !isPassed -> AlarmCardBackground_Cloud
+                !isCloudAlarm && isPassed -> AlarmCardBackground_Offline_Passed
+                else -> AlarmCardBackground_Offline
+            }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        shape = RoundedCornerShape(12.dp)
     ) {
-        Column(
+        Row(
             modifier = Modifier
-                .padding(16.dp)
                 .fillMaxWidth()
+                .height(IntrinsicSize.Min)
         ) {
+            // Cintillo lateral izquierdo más grueso
+            Box(
+                modifier = Modifier
+                    .width(6.dp)
+                    .fillMaxHeight()
+                    .background(
+                        if (isCloudAlarm) AlarmCardContrast_Cloud else AlarmCardContrast_Offline
+                    )
+            )
+            // Contenido principal
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .weight(1f)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -293,7 +478,9 @@ fun AlarmItem(
             ) {
                 Text(
                     text = alarm.title,
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (isPassed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) 
+                           else MaterialTheme.colorScheme.onSurface
                 )
                 Row {
                     TextButton(onClick = { onDuplicate() }) {
@@ -310,7 +497,9 @@ fun AlarmItem(
             Text(
                 text = alarm.description,
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(vertical = 4.dp)
+                modifier = Modifier.padding(vertical = 4.dp),
+                color = if (isPassed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) 
+                       else MaterialTheme.colorScheme.onSurface
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -318,11 +507,15 @@ fun AlarmItem(
             ) {
                 Text(
                     text = formatDateTime(alarm.date),
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isPassed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) 
+                           else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
                 Text(
                     text = alarm.category,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isPassed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) 
+                           else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -344,9 +537,11 @@ fun AlarmItem(
                 Text(
                     text = localRingtoneUri?.let { RingtoneManager.getRingtone(context, Uri.parse(it)).getTitle(context) } ?: "Que suene",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isPassed) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f) 
+                           else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
         }
     }
 }
@@ -369,6 +564,33 @@ private fun formatDateTime(date: Date): String {
     )
 }
 
+private fun formatDateOnly(date: Date): String {
+    val calendar = Calendar.getInstance().apply {
+        time = date
+    }
+    
+    return String.format("%02d/%02d/%d",
+        calendar.get(Calendar.DAY_OF_MONTH),
+        calendar.get(Calendar.MONTH) + 1,
+        calendar.get(Calendar.YEAR)
+    )
+}
+
+private fun formatTimeOnly(date: Date): String {
+    val calendar = Calendar.getInstance().apply {
+        time = date
+    }
+    
+    val hour12 = calendar.get(Calendar.HOUR)
+    val amPm = if (calendar.get(Calendar.AM_PM) == Calendar.AM) "AM" else "PM"
+    
+    return String.format("%02d:%02d %s",
+        if (hour12 == 0) 12 else hour12,
+        calendar.get(Calendar.MINUTE),
+        amPm
+    )
+}
+
 @Preview(showBackground = true)
 @Composable
 fun AlarmScreenPreview() {
@@ -381,7 +603,9 @@ fun AlarmScreenPreview() {
             onEditAlarm = { _ -> },
             onDuplicateAlarm = { _ -> },
             onChangeRingtone = { _, _ -> },
-            alarms = emptyList()
+            alarms = emptyList(),
+            projects = emptyList(),
+            environments = emptyList()
         )
     }
 } 

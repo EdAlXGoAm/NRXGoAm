@@ -52,6 +52,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import com.edalxgoam.nrxgoam.AlarmReceiver
+import com.edalxgoam.nrxgoam.TaskSyncManager
 
 // Función utilitaria para formatear fechas
 fun formatDateFromISO(isoString: String): String {
@@ -343,11 +344,15 @@ fun TaskScreen(
         }
     }
     
-    // Función para refrescar tareas manualmente (solo cambia el estado para forzar recomposición)
+    // Función para refrescar tareas manualmente (incluye sincronización inmediata)
     val refreshTasks = remember {
         {
             scope.launch {
                 isLoading = true
+                
+                // Ejecutar sincronización inmediata en segundo plano
+                TaskSyncManager.triggerImmediateSync(context)
+                
                 // Simular pequeña demora para mostrar el loading
                 kotlinx.coroutines.delay(500)
                 
@@ -699,6 +704,8 @@ fun TaskListScreen(
     errorMessage: String?,
     isRealtimeEnabled: Boolean
 ) {
+    val context = LocalContext.current
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -749,10 +756,17 @@ fun TaskListScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         // Indicador de estado de sincronización
+                        val lastSyncInfo = remember(key1 = context) { TaskSyncManager.getLastSyncInfo(context) }
                         Text(
                             text = if (isRealtimeEnabled) "🔄 Sincronización automática" else "📱 Modo manual",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isRealtimeEnabled) Color.Green else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Text(
+                            text = "⏰ Última sync en segundo plano: $lastSyncInfo",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
