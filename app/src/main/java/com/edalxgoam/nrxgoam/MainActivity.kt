@@ -5,14 +5,18 @@ import android.app.AlarmManager
 import android.app.DatePickerDialog
 import android.app.PendingIntent
 import android.app.TimePickerDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -48,6 +52,7 @@ import com.edalxgoam.nrxgoam.repository.FirebaseManager
 import com.edalxgoam.nrxgoam.ui.components.AlarmIconFromFirebase
 import com.edalxgoam.nrxgoam.ui.components.PantryIconFromFirebase
 import com.edalxgoam.nrxgoam.ui.screens.AlarmActivity
+import com.edalxgoam.nrxgoam.ui.screens.DownloadReelsActivity
 import com.edalxgoam.nrxgoam.ui.screens.PantryActivity
 import com.edalxgoam.nrxgoam.ui.screens.TaskActivity
 import com.edalxgoam.nrxgoam.ui.theme.*
@@ -58,12 +63,27 @@ class MainActivity : ComponentActivity() {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private lateinit var alarmRepository: AlarmRepository
     
+    // Estado de la burbuja flotante
+    private var isBubbleEnabled = mutableStateOf(false)
+    
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         if (isGranted) {
             // Permiso concedido
             println("Permiso de notificaciones concedido")
+        }
+    }
+    
+    // Launcher para el permiso de overlay
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Verificar si el permiso fue otorgado después de regresar de la configuración
+        if (Settings.canDrawOverlays(this)) {
+            startFloatingBubbleService()
+            isBubbleEnabled.value = true
+            saveBubbleState(true)
         }
     }
     
@@ -99,6 +119,14 @@ class MainActivity : ComponentActivity() {
         
         alarmRepository = AlarmRepository(this)
         
+        // Cargar estado de la burbuja flotante
+        isBubbleEnabled.value = loadBubbleState()
+        
+        // Si la burbuja estaba activa y tenemos permiso, reiniciarla
+        if (isBubbleEnabled.value && Settings.canDrawOverlays(this)) {
+            startFloatingBubbleService()
+        }
+        
         // Solicitar permiso de notificaciones en Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             when {
@@ -130,6 +158,14 @@ class MainActivity : ComponentActivity() {
                         onTaskClick = {
                             val intent = Intent(this, TaskActivity::class.java)
                             startActivity(intent)
+                        },
+                        onDownloadReelsClick = {
+                            val intent = Intent(this, DownloadReelsActivity::class.java)
+                            startActivity(intent)
+                        },
+                        isBubbleEnabled = isBubbleEnabled.value,
+                        onBubbleToggle = { enabled ->
+                            toggleFloatingBubble(enabled)
                         }
                     )
                 }
@@ -267,6 +303,56 @@ class MainActivity : ComponentActivity() {
         }
         startService(intent)
     }
+    
+    // Funciones para la burbuja flotante
+    private fun toggleFloatingBubble(enable: Boolean) {
+        if (enable) {
+            if (Settings.canDrawOverlays(this)) {
+                startFloatingBubbleService()
+                isBubbleEnabled.value = true
+                saveBubbleState(true)
+            } else {
+                // Solicitar permiso de overlay
+                requestOverlayPermission()
+            }
+        } else {
+            stopFloatingBubbleService()
+            isBubbleEnabled.value = false
+            saveBubbleState(false)
+        }
+    }
+    
+    private fun requestOverlayPermission() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        overlayPermissionLauncher.launch(intent)
+    }
+    
+    private fun startFloatingBubbleService() {
+        val intent = Intent(this, FloatingBubbleService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+    
+    private fun stopFloatingBubbleService() {
+        val intent = Intent(this, FloatingBubbleService::class.java)
+        stopService(intent)
+    }
+    
+    private fun saveBubbleState(enabled: Boolean) {
+        val prefs = getSharedPreferences("bubble_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("bubble_enabled", enabled).apply()
+    }
+    
+    private fun loadBubbleState(): Boolean {
+        val prefs = getSharedPreferences("bubble_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("bubble_enabled", false)
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -291,7 +377,10 @@ fun MainMenu(
     modifier: Modifier = Modifier,
     onAlarmClick: () -> Unit,
     onPantryClick: () -> Unit,
-    onTaskClick: () -> Unit
+    onTaskClick: () -> Unit,
+    onDownloadReelsClick: () -> Unit = {},
+    isBubbleEnabled: Boolean = false,
+    onBubbleToggle: (Boolean) -> Unit = {}
 ) {
     val menuItems = listOf(
         AppMenuItem(
@@ -314,6 +403,13 @@ fun MainMenu(
             headerColor = CardTeal,
             buttonColor = CardTeal,
             onClick = onTaskClick
+        ),
+        AppMenuItem(
+            title = "Download Reels",
+            description = "Descarga videos de Facebook, Instagram, YouTube y TikTok.",
+            headerColor = CardPink,
+            buttonColor = CardPink,
+            onClick = onDownloadReelsClick
         ),
         AppMenuItem(
             title = "Finanzas",
@@ -378,6 +474,50 @@ fun MainMenu(
                 color = Color(0xFF64748B),
                 textAlign = TextAlign.Center
             )
+        }
+        
+        // Control de burbuja flotante
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = Color.White
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Burbuja flotante",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = Color(0xFF1E293B)
+                    )
+                    Text(
+                        text = "Acceso rápido sobre otras apps",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF64748B)
+                    )
+                }
+                Switch(
+                    checked = isBubbleEnabled,
+                    onCheckedChange = onBubbleToggle,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = CardBlue,
+                        uncheckedThumbColor = Color.White,
+                        uncheckedTrackColor = Color(0xFFD1D5DB)
+                    )
+                )
+            }
         }
         
         // Grid de tarjetas
@@ -589,6 +729,13 @@ fun MenuIcon(
 @Composable
 fun MainMenuPreview() {
     NRXGoAmTheme {
-        MainMenu(onAlarmClick = {}, onPantryClick = {}, onTaskClick = {})
+        MainMenu(
+            onAlarmClick = {}, 
+            onPantryClick = {}, 
+            onTaskClick = {},
+            onDownloadReelsClick = {},
+            isBubbleEnabled = false,
+            onBubbleToggle = {}
+        )
     }
 }
