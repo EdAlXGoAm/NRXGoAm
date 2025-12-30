@@ -39,6 +39,13 @@ object ReelDownloaderService {
         data class Error(val message: String) : DownloadResult()
         data class Progress(val percentage: Int) : DownloadResult()
     }
+
+    data class CacheDownloadResult(
+        val file: File,
+        val fileName: String,
+        val contentType: String,
+        val sizeBytes: Long,
+    )
     
     /**
      * Descarga un video de cualquier plataforma soportada
@@ -130,6 +137,99 @@ object ReelDownloaderService {
         } catch (e: Exception) {
             e.printStackTrace()
             DownloadResult.Error("Error: ${e.message ?: "Error desconocido"}")
+        }
+    }
+
+    /**
+     * Descarga el video pero lo guarda como archivo temporal en cache (para "Guardar en la nube").
+     * Nota: evita cargar el video completo en memoria.
+     */
+    suspend fun downloadVideoToCacheFile(
+        context: Context,
+        videoUrl: String,
+        platform: Platform,
+        onProgress: (Int) -> Unit = {},
+    ): Result<CacheDownloadResult> = withContext(Dispatchers.IO) {
+        try {
+            val validationResult = validateUrl(videoUrl, platform)
+            if (validationResult != null) return@withContext Result.failure(IllegalArgumentException(validationResult))
+
+            val endpoint = when (platform) {
+                Platform.INSTAGRAM -> ENDPOINT_INSTAGRAM
+                Platform.FACEBOOK -> ENDPOINT_FACEBOOK
+                Platform.YOUTUBE -> ENDPOINT_YOUTUBE
+                Platform.TIKTOK -> ENDPOINT_TIKTOK
+            }
+
+            val url = URL("$BASE_URL$endpoint")
+            val connection = url.openConnection() as HttpURLConnection
+
+            connection.apply {
+                requestMethod = "POST"
+                doOutput = true
+                doInput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Accept", "video/mp4,application/json")
+                connectTimeout = 30000
+                readTimeout = 180000
+            }
+
+            val jsonBody = JSONObject().apply { put("url", videoUrl) }
+            connection.outputStream.use { os ->
+                os.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                os.flush()
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                val errorBody = connection.errorStream?.bufferedReader()?.readText() ?: "Error desconocido"
+                val errorMessage = try {
+                    JSONObject(errorBody).optString("error", "Error al descargar el video")
+                } catch (_: Exception) {
+                    "Error al descargar el video (código: $responseCode)"
+                }
+                return@withContext Result.failure(IllegalStateException(errorMessage))
+            }
+
+            val contentDisposition = connection.getHeaderField("Content-Disposition")
+            val defaultFileName = "${platform.name.lowercase()}_video_${System.currentTimeMillis()}.mp4"
+            val fileName = extractFileName(contentDisposition) ?: defaultFileName
+            val contentType = connection.contentType?.takeIf { it.isNotBlank() } ?: "video/mp4"
+            val contentLength = connection.contentLength
+
+            val outFile = File(context.cacheDir, "zy_${System.currentTimeMillis()}_$fileName")
+            var totalRead = 0L
+
+            connection.inputStream.use { input ->
+                FileOutputStream(outFile).use { output ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        totalRead += read
+                        if (contentLength > 0) {
+                            val p = ((totalRead * 100) / contentLength).toInt().coerceIn(0, 100)
+                            onProgress(p)
+                        }
+                    }
+                    output.flush()
+                }
+            }
+
+            onProgress(100)
+            connection.disconnect()
+
+            Result.success(
+                CacheDownloadResult(
+                    file = outFile,
+                    fileName = fileName,
+                    contentType = contentType,
+                    sizeBytes = totalRead
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
     

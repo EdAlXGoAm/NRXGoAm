@@ -468,7 +468,7 @@ fun MainMenu(
                 color = Color(0xFF1E293B)
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
+        Text(
                 text = "Todas tus aplicaciones en un solo lugar",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color(0xFF64748B),
@@ -486,7 +486,7 @@ fun MainMenu(
                 containerColor = Color.White
             )
         ) {
-            Row(
+        Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
@@ -627,9 +627,9 @@ fun AppCard(
                             fontWeight = FontWeight.SemiBold
                         )
                     )
-                }
-            }
         }
+    }
+}
     }
 }
 
