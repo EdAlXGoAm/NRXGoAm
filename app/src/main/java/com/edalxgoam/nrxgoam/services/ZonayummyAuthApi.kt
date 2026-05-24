@@ -18,7 +18,7 @@ object ZonayummyAuthApi {
         username: String,
         password: String,
     ): LoginResult = postLogin(
-        path = "/auth/username/login",
+        path = "/zonayummy/auth/username/login",
         payload = JSONObject()
             .put("username", username)
             .put("password", password)
@@ -31,7 +31,7 @@ object ZonayummyAuthApi {
         email: String,
         password: String,
     ): LoginResult = postLogin(
-        path = "/auth/email/login",
+        path = "/zonayummy/auth/email/login",
         payload = JSONObject()
             .put("email", email)
             .put("password", password)
@@ -44,7 +44,7 @@ object ZonayummyAuthApi {
         phone: String,
         password: String,
     ): LoginResult = postLogin(
-        path = "/auth/phone/login",
+        path = "/zonayummy/auth/phone/login",
         payload = JSONObject()
             .put("phone", phone)
             .put("password", password)
