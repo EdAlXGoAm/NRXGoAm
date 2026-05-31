@@ -13,7 +13,9 @@ import android.os.Bundle
 import android.os.Environment
 import android.util.LruCache
 import android.widget.Toast
+import android.widget.VideoView
 import android.provider.MediaStore
+import androidx.annotation.DrawableRes
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +23,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
@@ -30,8 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -61,6 +64,15 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.filled.PlayArrow
+import android.media.MediaPlayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
@@ -77,8 +89,11 @@ import com.edalxgoam.nrxgoam.services.ZonayummySessionStore
 import com.edalxgoam.nrxgoam.services.ZyFolder
 import com.edalxgoam.nrxgoam.services.ZyHistoryItem
 import com.edalxgoam.nrxgoam.services.ZyLabel
+import com.edalxgoam.nrxgoam.services.ZyUploadUrlResult
 import com.edalxgoam.nrxgoam.ui.theme.NRXGoAmTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
@@ -194,6 +209,59 @@ val platforms = listOf(
     )
 )
 
+private fun platformSlug(index: Int): String = when (platforms[index].name) {
+    "Instagram" -> "instagram"
+    "Facebook" -> "facebook"
+    "YouTube" -> "youtube"
+    "TikTok" -> "tiktok"
+    else -> "unknown"
+}
+
+@DrawableRes
+private fun platformIconRes(slug: String): Int = when (slug.lowercase()) {
+    "instagram" -> R.drawable.ic_instagram
+    "facebook" -> R.drawable.ic_facebook
+    "youtube" -> R.drawable.ic_youtube
+    "tiktok" -> R.drawable.ic_tiktok
+    else -> R.drawable.ic_download
+}
+
+private fun platformGradientBrush(index: Int): Brush {
+    return when (platforms[index].name) {
+        "Instagram" -> Brush.linearGradient(
+            colors = listOf(Color(0xFF833AB4), Color(0xFFFD1D1D), Color(0xFFFCB045))
+        )
+        "TikTok" -> Brush.linearGradient(
+            colors = listOf(Color(0xFF000000), Color(0xFF25F4EE), Color(0xFFFE2C55))
+        )
+        "YouTube" -> Brush.linearGradient(
+            colors = listOf(Color(0xFFFF0000), Color(0xFF282828))
+        )
+        "Facebook" -> Brush.linearGradient(
+            colors = listOf(Color(0xFF1877F2), Color(0xFF42B72A))
+        )
+        else -> Brush.linearGradient(colors = listOf(CeoStyle.Bg, CeoStyle.Bg))
+    }
+}
+
+private fun platformItemGradient(slug: String): Brush {
+    return when (slug.lowercase()) {
+        "instagram" -> Brush.linearGradient(listOf(Color(0xFF833AB4), Color(0xFFFD1D1D), Color(0xFFFCB045)))
+        "tiktok" -> Brush.linearGradient(listOf(Color(0xFF000000), Color(0xFF25F4EE), Color(0xFFFE2C55)))
+        "youtube" -> Brush.linearGradient(listOf(Color(0xFFFF0000), Color(0xFF282828)))
+        "facebook" -> Brush.linearGradient(listOf(Color(0xFF1877F2), Color(0xFF42B72A)))
+        else -> Brush.linearGradient(listOf(Color(0xFF64748B), Color(0xFF334155)))
+    }
+}
+
+private fun platformDisplayName(slug: String): String = when (slug.lowercase()) {
+    "instagram" -> "Instagram"
+    "facebook" -> "Facebook"
+    "youtube" -> "YouTube"
+    "tiktok" -> "TikTok"
+    else -> slug.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+}
+
 // Estados de descarga
 sealed class DownloadState {
     object Idle : DownloadState()
@@ -303,6 +371,7 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
 
     var zySession by remember { mutableStateOf(ZonayummySessionStore.getSession(context)) }
     var showLogin by remember { mutableStateOf(false) }
+    var showGalleryModal by remember { mutableStateOf(false) }
 
     // Drawer / historial
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -347,30 +416,59 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
         for (id in prev) if (!next.contains(id)) bumpLabelUsage(id, -1)
     }
 
-    fun refreshHistory() {
+    fun prependCloudHistoryItem(upload: ZyUploadUrlResult, sizeBytes: Long, createdAt: Long) {
+        val newItem = ZyHistoryItem(
+            id = upload.downloadId,
+            platform = upload.platform,
+            url = upload.url,
+            blobPath = upload.blobPath,
+            blobUrl = upload.blobUrl,
+            downloadUrlWithSas = upload.downloadUrlWithSas,
+            contentType = upload.contentType,
+            size = sizeBytes,
+            createdAt = createdAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
+        )
+        zyItems = listOf(newItem) + zyItems.filterNot { it.id == upload.downloadId }
+    }
+
+    fun patchMovedItems(ids: Collection<String>, folderId: String?) {
+        if (ids.isEmpty()) return
+        val idSet = ids.toSet()
+        zyItems = zyItems.map { if (idSet.contains(it.id)) it.copy(folderId = folderId) else it }
+    }
+
+    fun refreshHistory(showLoading: Boolean = false) {
         val token = zySession?.token ?: return
         coroutineScope.launch {
-            zyHistoryLoading = true
-            zyHistoryError = ""
+            if (showLoading) zyHistoryLoading = true
+            if (showLoading) zyHistoryError = ""
             val result = withContext(Dispatchers.IO) {
-                val links = ZonayummyReelHistoryApi.listUserLinks(token)
-                val folders = ZonayummyReelHistoryApi.listFolders(token)
-                val labels = ZonayummyReelHistoryApi.listLabels(token)
-                Triple(links, folders, labels)
+                coroutineScope {
+                    val links = async { ZonayummyReelHistoryApi.listUserLinks(token) }
+                    val folders = async { ZonayummyReelHistoryApi.listFolders(token) }
+                    val labels = async { ZonayummyReelHistoryApi.listLabels(token) }
+                    Triple(links.await(), folders.await(), labels.await())
+                }
             }
             when (val linksRes = result.first) {
                 is ZonayummyReelHistoryApi.ApiResult.Ok -> zyItems = linksRes.value.items
-                is ZonayummyReelHistoryApi.ApiResult.Err -> zyHistoryError = linksRes.message
+                is ZonayummyReelHistoryApi.ApiResult.Err -> if (showLoading) zyHistoryError = linksRes.message
             }
             when (val foldersRes = result.second) {
                 is ZonayummyReelHistoryApi.ApiResult.Ok -> zyFolders = foldersRes.value
-                is ZonayummyReelHistoryApi.ApiResult.Err -> if (zyHistoryError.isBlank()) zyHistoryError = foldersRes.message
+                is ZonayummyReelHistoryApi.ApiResult.Err -> if (showLoading && zyHistoryError.isBlank()) zyHistoryError = foldersRes.message
             }
             when (val labelsRes = result.third) {
                 is ZonayummyReelHistoryApi.ApiResult.Ok -> zyLabels = labelsRes.value
-                is ZonayummyReelHistoryApi.ApiResult.Err -> if (zyHistoryError.isBlank()) zyHistoryError = labelsRes.message
+                is ZonayummyReelHistoryApi.ApiResult.Err -> if (showLoading && zyHistoryError.isBlank()) zyHistoryError = labelsRes.message
             }
-            zyHistoryLoading = false
+            if (showLoading) zyHistoryLoading = false
+        }
+    }
+
+    LaunchedEffect(zySession?.token) {
+        if (zySession != null && zyItems.isEmpty()) {
+            refreshHistory(showLoading = false)
         }
     }
 
@@ -440,216 +538,299 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
         }
     }
 
+    @Composable
+    fun HistoryPanelContent(
+        modifier: Modifier,
+        onOpenGallery: (() -> Unit)?,
+    ) {
+        DownloadReelsHistoryPanel(
+            modifier = modifier,
+            zySession = zySession,
+            loading = zyHistoryLoading,
+            error = zyHistoryError,
+            folders = zyFolders,
+            labels = zyLabels,
+            items = zyItems,
+            folderFilter = folderFilter,
+            selectedIds = selectedIds,
+            onSelectFolder = { folderFilter = it },
+            onRefresh = { refreshHistory(showLoading = true) },
+            onCreateFolder = { showCreateFolder = true },
+            onDeleteSelectedFolder = {
+                val fid = (folderFilter as? ZyFolderFilter.Folder)?.id
+                val session = zySession
+                if (fid == null || session == null) return@DownloadReelsHistoryPanel
+                if (!canDeleteFolder(fid)) {
+                    Toast.makeText(context, "No se puede eliminar: hay links en esta carpeta", Toast.LENGTH_LONG).show()
+                    return@DownloadReelsHistoryPanel
+                }
+                coroutineScope.launch {
+                    val res = withContext(Dispatchers.IO) { ZonayummyReelHistoryApi.deleteFolder(session.token, fid) }
+                    when (res) {
+                        is ZonayummyReelHistoryApi.ApiResult.Ok -> {
+                            Toast.makeText(context, "Carpeta eliminada", Toast.LENGTH_SHORT).show()
+                            val deletedIds = res.value.toSet()
+                            zyFolders = zyFolders.filterNot { deletedIds.contains(it.id) }
+                            folderFilter = ZyFolderFilter.Unassigned
+                        }
+                        is ZonayummyReelHistoryApi.ApiResult.Err -> {
+                            Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            },
+            onToggleSelect = { id ->
+                selectedIds = if (selectedIds.contains(id)) selectedIds - id else selectedIds + id
+            },
+            onClearSelection = { selectedIds = emptySet() },
+            onMoveSelected = { showMoveDialog = true },
+            onDeleteSelected = { showDeleteDialog = true },
+            onCopyUrl = { url ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("url", url))
+                Toast.makeText(context, "Link copiado", Toast.LENGTH_SHORT).show()
+            },
+            onOpenUrl = { url ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(context, "No hay app para abrir este link", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No se pudo abrir: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            },
+            onDownloadItem = { item ->
+                val u = item.downloadUrlWithSas
+                if (u.isNullOrBlank()) {
+                    Toast.makeText(context, "Aún no hay URL de descarga (SAS)", Toast.LENGTH_SHORT).show()
+                    return@DownloadReelsHistoryPanel
+                }
+                try {
+                    val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    val req = DownloadManager.Request(Uri.parse(u)).apply {
+                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        setAllowedOverMetered(true)
+                        setAllowedOverRoaming(true)
+                        val filename = "${item.platform}_${item.id.takeLast(10)}.mp4"
+                        setTitle(filename)
+                        setDestinationInExternalPublicDir(
+                            Environment.DIRECTORY_MOVIES,
+                            "NRXGoAm/$filename"
+                        )
+                    }
+                    dm.enqueue(req)
+                    Toast.makeText(context, "Descargando… revisa notificaciones", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No se pudo iniciar descarga: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            },
+            onEditItem = { editingItem = it },
+            onOpenGallery = onOpenGallery,
+        )
+    }
+
+    val reelsTopBar: @Composable () -> Unit = {
+        DownloadReelsTopBar(
+            onBackClick = onBackClick,
+            zySession = zySession,
+            onOpenHistory = {
+                coroutineScope.launch {
+                    drawerState.open()
+                    if (zySession != null && zyItems.isEmpty()) refreshHistory(showLoading = true)
+                }
+            },
+            onOpenLogin = { showLogin = true },
+            onLogout = {
+                ZonayummySessionStore.clearSession(context)
+                zySession = null
+                zyItems = emptyList()
+                zyFolders = emptyList()
+                zyLabels = emptyList()
+                folderFilter = ZyFolderFilter.Unassigned
+                selectedIds = emptySet()
+                Toast.makeText(context, "Sesión cerrada", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    val reelsMainScreen: @Composable (Modifier) -> Unit = { contentModifier ->
+        DownloadReelsScreen(
+            modifier = contentModifier,
+            zySession = zySession,
+            webStyle = false,
+            onRequireLogin = { showLogin = true },
+            onCloudSaveRequested = { url, platform ->
+                if (zySession == null) {
+                    pendingCloudSave = url to platform
+                    showLogin = true
+                }
+            },
+            onCloudSave = { url, platform, setState ->
+                val session = zySession ?: run {
+                    setState(DownloadState.Error("Necesitas iniciar sesión para guardar en la nube"))
+                    return@DownloadReelsScreen
+                }
+                coroutineScope.launch {
+                    setState(DownloadState.CloudSaving(0, "Descargando video…"))
+                    val temp = ReelDownloaderService.downloadVideoToCacheFile(
+                        context = context,
+                        videoUrl = url,
+                        platform = platform,
+                        onProgress = { p -> setState(DownloadState.CloudSaving((p * 0.4).toInt(), "Descargando video… $p%")) }
+                    )
+                    if (temp.isFailure) {
+                        setState(DownloadState.Error(temp.exceptionOrNull()?.message ?: "Error descargando"))
+                        return@launch
+                    }
+                    val cache = temp.getOrThrow()
+
+                    try {
+                        setState(DownloadState.CloudSaving(45, "Generando URL de subida…"))
+                        val uploadUrlRes = withContext(Dispatchers.IO) {
+                            ZonayummyReelHistoryApi.getUploadUrl(
+                                token = session.token,
+                                platform = platform.name.lowercase(),
+                                url = url,
+                                contentType = cache.contentType
+                            )
+                        }
+                        val upload = when (uploadUrlRes) {
+                            is ZonayummyReelHistoryApi.ApiResult.Ok -> uploadUrlRes.value
+                            is ZonayummyReelHistoryApi.ApiResult.Err -> {
+                                setState(DownloadState.Error(uploadUrlRes.message))
+                                return@launch
+                            }
+                        }
+
+                        setState(DownloadState.CloudSaving(55, "Subiendo a la nube…"))
+                        val up = uploadFileToBlob(
+                            uploadUrlWithSas = upload.uploadUrlWithSas,
+                            file = cache.file,
+                            contentType = cache.contentType,
+                            onProgress = { p -> setState(DownloadState.CloudSaving(55 + (p * 0.35).toInt(), "Subiendo… $p%")) }
+                        )
+                        if (up.isFailure) {
+                            setState(DownloadState.Error(up.exceptionOrNull()?.message ?: "Error subiendo a Blob"))
+                            return@launch
+                        }
+
+                        setState(DownloadState.CloudSaving(92, "Guardando registro…"))
+                        val created = withContext(Dispatchers.IO) {
+                            ZonayummyReelHistoryApi.createRecord(
+                                token = session.token,
+                                downloadId = upload.downloadId,
+                                platform = upload.platform,
+                                url = upload.url,
+                                blobPath = upload.blobPath,
+                                contentType = upload.contentType,
+                                size = cache.sizeBytes
+                            )
+                        }
+                        when (created) {
+                            is ZonayummyReelHistoryApi.ApiResult.Err -> {
+                                setState(DownloadState.Error(created.message))
+                                return@launch
+                            }
+                            is ZonayummyReelHistoryApi.ApiResult.Ok -> {
+                                prependCloudHistoryItem(
+                                    upload = upload,
+                                    sizeBytes = cache.sizeBytes,
+                                    createdAt = created.value,
+                                )
+                            }
+                        }
+
+                        withContext(Dispatchers.IO) {
+                            ZonayummyReelHistoryApi.generateThumbnail(session.token, upload.downloadId)
+                        }
+
+                        setState(DownloadState.CloudSuccess("✅ Guardado en la nube"))
+                        refreshHistory(showLoading = false)
+                    } finally {
+                        try { cache.file.delete() } catch (_: Exception) {}
+                    }
+                }
+            },
+            onRefreshHistory = { refreshHistory(showLoading = false) },
+            onPrependCloudHistoryItem = { upload, sizeBytes, createdAt ->
+                prependCloudHistoryItem(upload, sizeBytes, createdAt)
+            },
+            onUploadFileToBlob = { u, f, c, p -> uploadFileToBlob(u, f, c, p) }
+        )
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            DownloadReelsHistoryDrawer(
-                zySession = zySession,
-                loading = zyHistoryLoading,
-                error = zyHistoryError,
-                folders = zyFolders,
-                labels = zyLabels,
-                items = zyItems,
-                folderFilter = folderFilter,
-                selectedIds = selectedIds,
-                onSelectFolder = { folderFilter = it },
-                onRefresh = { refreshHistory() },
-                onCreateFolder = { showCreateFolder = true },
-                onDeleteSelectedFolder = {
-                    val fid = (folderFilter as? ZyFolderFilter.Folder)?.id
-                    val session = zySession
-                    if (fid == null || session == null) return@DownloadReelsHistoryDrawer
-                    if (!canDeleteFolder(fid)) {
-                        Toast.makeText(context, "No se puede eliminar: hay links en esta carpeta", Toast.LENGTH_LONG).show()
-                        return@DownloadReelsHistoryDrawer
-                    }
-                    coroutineScope.launch {
-                        val res = withContext(Dispatchers.IO) { ZonayummyReelHistoryApi.deleteFolder(session.token, fid) }
-                        when (res) {
-                            is ZonayummyReelHistoryApi.ApiResult.Ok -> {
-                                Toast.makeText(context, "Carpeta eliminada", Toast.LENGTH_SHORT).show()
-                                folderFilter = ZyFolderFilter.Unassigned
-                                refreshHistory()
-                            }
-                            is ZonayummyReelHistoryApi.ApiResult.Err -> {
-                                Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    }
-                },
-                onToggleSelect = { id ->
-                    selectedIds = if (selectedIds.contains(id)) selectedIds - id else selectedIds + id
-                },
-                onClearSelection = { selectedIds = emptySet() },
-                onMoveSelected = { showMoveDialog = true },
-                onDeleteSelected = { showDeleteDialog = true },
-                onCopyUrl = { url ->
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("url", url))
-                    Toast.makeText(context, "Link copiado", Toast.LENGTH_SHORT).show()
-                },
-                onOpenUrl = { url ->
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(intent)
-                    } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(context, "No hay app para abrir este link", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "No se pudo abrir: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                },
-                onDownloadItem = { item ->
-                    val u = item.downloadUrlWithSas
-                    if (u.isNullOrBlank()) {
-                        Toast.makeText(context, "Aún no hay URL de descarga (SAS)", Toast.LENGTH_SHORT).show()
-                        return@DownloadReelsHistoryDrawer
-                    }
-                    try {
-                        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                        val req = DownloadManager.Request(Uri.parse(u)).apply {
-                            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                            setAllowedOverMetered(true)
-                            setAllowedOverRoaming(true)
-                            val filename = "${item.platform}_${item.id.takeLast(10)}.mp4"
-                            setTitle(filename)
-                            setDestinationInExternalPublicDir(
-                                Environment.DIRECTORY_MOVIES,
-                                "NRXGoAm/$filename"
-                            )
-                        }
-                        dm.enqueue(req)
-                        Toast.makeText(context, "Descargando… revisa notificaciones", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "No se pudo iniciar descarga: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                },
-                onEditItem = { editingItem = it }
-            )
+            ModalDrawerSheet(
+                modifier = Modifier.widthIn(max = 380.dp),
+                drawerContainerColor = CeoStyle.Surface
+            ) {
+                if (drawerState.isOpen) {
+                    HistoryPanelContent(
+                        modifier = Modifier.fillMaxHeight().padding(12.dp),
+                        onOpenGallery = { showGalleryModal = true },
+                    )
+                }
+            }
         }
     ) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            topBar = {
-                DownloadReelsTopBar(
-                    onBackClick = onBackClick,
-                    zySession = zySession,
-                    onOpenHistory = {
-                        coroutineScope.launch {
-                            drawerState.open()
-                            if (zySession != null && zyItems.isEmpty()) refreshHistory()
-                        }
-                    },
-                    onOpenLogin = { showLogin = true },
-                    onLogout = {
-                        ZonayummySessionStore.clearSession(context)
-                        zySession = null
-                        zyItems = emptyList()
-                        zyFolders = emptyList()
-                        zyLabels = emptyList()
-                    folderFilter = ZyFolderFilter.Unassigned
-                        selectedIds = emptySet()
-                        Toast.makeText(context, "Sesión cerrada", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            }
+            topBar = reelsTopBar
         ) { innerPadding ->
-            DownloadReelsScreen(
-                modifier = Modifier.padding(innerPadding),
-                zySession = zySession,
-                onRequireLogin = { showLogin = true },
-                onCloudSaveRequested = { url, platform ->
-                    if (zySession == null) {
-                        pendingCloudSave = url to platform
-                        showLogin = true
-                    }
-                },
-                onCloudSave = { url, platform, setState ->
-                    val session = zySession ?: run {
-                        setState(DownloadState.Error("Necesitas iniciar sesión para guardar en la nube"))
-                        return@DownloadReelsScreen
-                    }
-                    coroutineScope.launch {
-                        setState(DownloadState.CloudSaving(0, "Descargando video…"))
-                        val temp = ReelDownloaderService.downloadVideoToCacheFile(
-                            context = context,
-                            videoUrl = url,
-                            platform = platform,
-                            onProgress = { p -> setState(DownloadState.CloudSaving((p * 0.4).toInt(), "Descargando video… $p%")) }
-                        )
-                        if (temp.isFailure) {
-                            setState(DownloadState.Error(temp.exceptionOrNull()?.message ?: "Error descargando"))
-                            return@launch
-                        }
-                        val cache = temp.getOrThrow()
-
-                        try {
-                            setState(DownloadState.CloudSaving(45, "Generando URL de subida…"))
-                            val uploadUrlRes = withContext(Dispatchers.IO) {
-                                ZonayummyReelHistoryApi.getUploadUrl(
-                                    token = session.token,
-                                    platform = platform.name.lowercase(),
-                                    url = url,
-                                    contentType = cache.contentType
-                                )
-                            }
-                            val upload = when (uploadUrlRes) {
-                                is ZonayummyReelHistoryApi.ApiResult.Ok -> uploadUrlRes.value
-                                is ZonayummyReelHistoryApi.ApiResult.Err -> {
-                                    setState(DownloadState.Error(uploadUrlRes.message))
-                                    return@launch
-                                }
-                            }
-
-                            setState(DownloadState.CloudSaving(55, "Subiendo a la nube…"))
-                            val up = uploadFileToBlob(
-                                uploadUrlWithSas = upload.uploadUrlWithSas,
-                                file = cache.file,
-                                contentType = cache.contentType,
-                                onProgress = { p -> setState(DownloadState.CloudSaving(55 + (p * 0.35).toInt(), "Subiendo… $p%")) }
-                            )
-                            if (up.isFailure) {
-                                setState(DownloadState.Error(up.exceptionOrNull()?.message ?: "Error subiendo a Blob"))
-                                return@launch
-                            }
-
-                            setState(DownloadState.CloudSaving(92, "Guardando registro…"))
-                            val created = withContext(Dispatchers.IO) {
-                                ZonayummyReelHistoryApi.createRecord(
-                                    token = session.token,
-                                    downloadId = upload.downloadId,
-                                    platform = upload.platform,
-                                    url = upload.url,
-                                    blobPath = upload.blobPath,
-                                    contentType = upload.contentType,
-                                    size = cache.sizeBytes
-                                )
-                            }
-                            when (created) {
-                                is ZonayummyReelHistoryApi.ApiResult.Err -> {
-                                    setState(DownloadState.Error(created.message))
-                                    return@launch
-                                }
-                                else -> {}
-                            }
-
-                            // thumbnail en background (no bloquea el éxito)
-                            withContext(Dispatchers.IO) {
-                                ZonayummyReelHistoryApi.generateThumbnail(session.token, upload.downloadId)
-                            }
-
-                            setState(DownloadState.CloudSuccess("✅ Guardado en la nube"))
-                            refreshHistory()
-                        } finally {
-                            try { cache.file.delete() } catch (_: Exception) {}
-                        }
-                    }
-                },
-                onRefreshHistory = { refreshHistory() },
-                onUploadFileToBlob = { u, f, c, p -> uploadFileToBlob(u, f, c, p) }
-            )
+            reelsMainScreen(Modifier.padding(innerPadding))
         }
+    }
+
+    if (showGalleryModal && zySession != null) {
+        ZyHistoryGalleryDialog(
+            items = zyItems,
+            onDismiss = { showGalleryModal = false },
+            onCopyUrl = { url ->
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("url", url))
+                Toast.makeText(context, "Link copiado", Toast.LENGTH_SHORT).show()
+            },
+            onOpenUrl = { url ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                    Toast.makeText(context, "No se pudo abrir el link", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDownloadItem = { item ->
+                val u = item.downloadUrlWithSas
+                if (u.isNullOrBlank()) {
+                    Toast.makeText(context, "Aún no hay URL de descarga (SAS)", Toast.LENGTH_SHORT).show()
+                    return@ZyHistoryGalleryDialog
+                }
+                try {
+                    val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    val req = DownloadManager.Request(Uri.parse(u)).apply {
+                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        setAllowedOverMetered(true)
+                        setAllowedOverRoaming(true)
+                        val filename = "${item.platform}_${item.id.takeLast(10)}.mp4"
+                        setTitle(filename)
+                        setDestinationInExternalPublicDir(
+                            Environment.DIRECTORY_MOVIES,
+                            "NRXGoAm/$filename"
+                        )
+                    }
+                    dm.enqueue(req)
+                    Toast.makeText(context, "Descargando… revisa notificaciones", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "No se pudo iniciar descarga: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            },
+        )
     }
 
     if (showLogin) {
@@ -660,6 +841,7 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
                 ZonayummySessionStore.saveSession(context, session)
                 zySession = session
                 showLogin = false
+                refreshHistory(showLoading = true)
                 Toast.makeText(context, "Sesión iniciada: $username", Toast.LENGTH_SHORT).show()
 
                 // ejecutar acción pendiente
@@ -684,9 +866,9 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
                     when (res) {
                         is ZonayummyReelHistoryApi.ApiResult.Ok -> {
                             Toast.makeText(context, "Movidos: ${res.value}", Toast.LENGTH_SHORT).show()
+                            patchMovedItems(ids, folderId)
                             selectedIds = emptySet()
                             showMoveDialog = false
-                            refreshHistory()
                         }
                         is ZonayummyReelHistoryApi.ApiResult.Err -> Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                     }
@@ -745,7 +927,6 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
                             // Actualizar item local rápido
                             zyItems = zyItems.map { if (it.id == res.value.id) res.value else it }
                             editingItem = null
-                            refreshHistory()
                         }
                         is ZonayummyReelHistoryApi.ApiResult.Err -> Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                     }
@@ -764,8 +945,8 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
                     when (res) {
                         is ZonayummyReelHistoryApi.ApiResult.Ok -> {
                             Toast.makeText(context, "Carpeta creada", Toast.LENGTH_SHORT).show()
+                            zyFolders = (zyFolders + res.value).sortedBy { it.order }
                             showCreateFolder = false
-                            refreshHistory()
                         }
                         is ZonayummyReelHistoryApi.ApiResult.Err -> Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
                     }
@@ -838,7 +1019,6 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
                             } else {
                                 Toast.makeText(context, "Eliminados: $deletedCount", Toast.LENGTH_SHORT).show()
                             }
-                            refreshHistory()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = CeoStyle.Danger, contentColor = CeoStyle.Surface)
@@ -855,10 +1035,12 @@ fun DownloadReelsRoot(onBackClick: () -> Unit) {
 fun DownloadReelsScreen(
     modifier: Modifier = Modifier,
     zySession: ZonayummySession?,
+    webStyle: Boolean = false,
     onRequireLogin: () -> Unit,
     onCloudSaveRequested: (String, ReelDownloaderService.Platform) -> Unit,
     onCloudSave: (String, ReelDownloaderService.Platform, (DownloadState) -> Unit) -> Unit,
     onRefreshHistory: () -> Unit,
+    onPrependCloudHistoryItem: (ZyUploadUrlResult, Long, Long) -> Unit,
     onUploadFileToBlob: suspend (String, File, String, (Int) -> Unit) -> Result<Unit>,
 ) {
     var selectedTabIndex by remember { mutableStateOf(0) } // Instagram primero
@@ -868,13 +1050,150 @@ fun DownloadReelsScreen(
     val coroutineScope = rememberCoroutineScope()
     
     val currentPlatform = platforms[selectedTabIndex]
+    val glassSurface = Color.White.copy(alpha = 0.12f)
+    val glassBorder = Color.White.copy(alpha = 0.22f)
+    val webText = Color.White
+    val webMuted = Color.White.copy(alpha = 0.78f)
+    val webPlaceholder = Color.White.copy(alpha = 0.5f)
     
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(CeoStyle.Bg)
+            .then(
+                if (webStyle) Modifier.background(platformGradientBrush(selectedTabIndex))
+                else Modifier.background(CeoStyle.Bg)
+            )
     ) {
+        if (webStyle) {
+            Box(
+                modifier = Modifier
+                    .size(220.dp)
+                    .offset(x = (-60).dp, y = (-40).dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+            )
+            Box(
+                modifier = Modifier
+                    .size(180.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 40.dp, y = 60.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+            )
+        }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
+        if (webStyle) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(id = platformIconRes(platformSlug(selectedTabIndex))),
+                        contentDescription = null,
+                        tint = Color.Unspecified,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Video Downloader",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    color = webText,
+                )
+                Text(
+                    text = "Descarga videos de tus redes favoritas",
+                    fontSize = 14.sp,
+                    color = webMuted,
+                )
+                Spacer(Modifier.height(12.dp))
+                if (zySession == null) {
+                    Text(
+                        text = "Modo invitado: puedes descargar, pero no se guardará el link ni el video.",
+                        fontSize = 12.sp,
+                        color = webMuted,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRequireLogin,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, glassBorder),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = glassSurface,
+                            contentColor = webText,
+                        ),
+                    ) { Text("Iniciar sesión para guardar") }
+                } else {
+                    Text(
+                        text = "Sesión ZonaYummy: ${zySession.username}",
+                        fontSize = 12.sp,
+                        color = webMuted,
+                    )
+                }
+            }
+        }
+
         // Tab Row
+        if (webStyle) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(glassSurface)
+                    .padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                platforms.forEachIndexed { index, platform ->
+                    val selected = selectedTabIndex == index
+                    val tabBg = if (selected) Color.White else Color.Transparent
+                    val tabFg = if (selected) Color(0xFF1F2937) else webText
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(tabBg)
+                            .clickable {
+                                selectedTabIndex = index
+                                linkText = ""
+                                downloadState = DownloadState.Idle
+                            }
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            painter = painterResource(id = platformIconRes(platformSlug(index))),
+                            contentDescription = platform.name,
+                            tint = Color.Unspecified,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = platform.name,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = tabFg,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        } else {
         ScrollableTabRow(
             selectedTabIndex = selectedTabIndex,
             containerColor = CeoStyle.Surface,
@@ -915,8 +1234,9 @@ fun DownloadReelsScreen(
                 )
             }
         }
+        }
         
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(if (webStyle) 12.dp else 32.dp))
         
         // Contenido principal
         Column(
@@ -925,6 +1245,7 @@ fun DownloadReelsScreen(
                 .padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (!webStyle) {
             // Login hint (ZonaYummy)
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -966,8 +1287,10 @@ fun DownloadReelsScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // Título de la plataforma seleccionada
+            if (!webStyle) {
             Text(
                 text = "Descargar de ${currentPlatform.name}",
                 fontSize = 24.sp,
@@ -1018,13 +1341,18 @@ fun DownloadReelsScreen(
             }
             
             Spacer(modifier = Modifier.height(24.dp))
-            
+            }
+
             // Campo de texto con botón de pegar
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(if (webStyle) 24.dp else 16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = CeoStyle.Surface
+                    containerColor = if (webStyle) glassSurface else CeoStyle.Surface
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (webStyle) glassBorder else CeoStyle.Border
                 )
             ) {
                 Row(
@@ -1045,16 +1373,16 @@ fun DownloadReelsScreen(
                         placeholder = {
                             Text(
                                 text = currentPlatform.placeholder,
-                                color = CeoStyle.Placeholder,
+                                color = if (webStyle) webPlaceholder else CeoStyle.Placeholder,
                                 fontSize = 12.sp
                             )
                         },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = CeoStyle.Text,
-                            unfocusedTextColor = CeoStyle.Text,
-                            cursorColor = CeoStyle.Cyan,
-                            focusedBorderColor = CeoStyle.Cyan,
-                            unfocusedBorderColor = CeoStyle.Border2,
+                            focusedTextColor = if (webStyle) webText else CeoStyle.Text,
+                            unfocusedTextColor = if (webStyle) webText else CeoStyle.Text,
+                            cursorColor = if (webStyle) Color.White else CeoStyle.Cyan,
+                            focusedBorderColor = if (webStyle) Color.White.copy(alpha = 0.5f) else CeoStyle.Cyan,
+                            unfocusedBorderColor = if (webStyle) glassBorder else CeoStyle.Border2,
                             focusedContainerColor = CeoStyle.Bg,
                             unfocusedContainerColor = CeoStyle.Bg
                         ),
@@ -1310,12 +1638,15 @@ fun DownloadReelsScreen(
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(if (webStyle) 18.dp else 16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CeoStyle.Surface,
-                        contentColor = CeoStyle.Text
+                        containerColor = if (webStyle) glassSurface else CeoStyle.Surface,
+                        contentColor = if (webStyle) webText else CeoStyle.Text
                     ),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, CeoStyle.Border2),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (webStyle) glassBorder else CeoStyle.Border2
+                    ),
                     enabled = downloadState !is DownloadState.Downloading && downloadState !is DownloadState.CloudSaving
                 ) {
                     Text("Guardar en la nube", fontWeight = FontWeight.Bold)
@@ -1427,7 +1758,13 @@ fun DownloadReelsScreen(
                                         downloadState = DownloadState.Error(created.message)
                                         return@launch
                                     }
-                                    else -> {}
+                                    is ZonayummyReelHistoryApi.ApiResult.Ok -> {
+                                        onPrependCloudHistoryItem(
+                                            upload,
+                                            cache.sizeBytes,
+                                            created.value,
+                                        )
+                                    }
                                 }
 
                                 withContext(Dispatchers.IO) {
@@ -1444,11 +1781,11 @@ fun DownloadReelsScreen(
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(if (webStyle) 18.dp else 16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CeoStyle.Cyan,
-                        contentColor = CeoStyle.Surface,
-                        disabledContainerColor = CeoStyle.Border
+                        containerColor = if (webStyle) Color.White else CeoStyle.Cyan,
+                        contentColor = if (webStyle) Color(0xFF1F2937) else CeoStyle.Surface,
+                        disabledContainerColor = if (webStyle) Color.White.copy(alpha = 0.35f) else CeoStyle.Border
                     ),
                     enabled = linkText.isNotBlank() &&
                         currentPlatform.isAvailable &&
@@ -1461,6 +1798,57 @@ fun DownloadReelsScreen(
             
             Spacer(modifier = Modifier.height(32.dp))
             
+            if (webStyle) {
+                Text(
+                    text = "¿Cómo usar?",
+                    fontWeight = FontWeight.Bold,
+                    color = webText,
+                    fontSize = 14.sp,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(
+                        "Copia el link del video",
+                        "Pégalo aquí arriba",
+                        "Descarga o guarda en la nube",
+                    ).forEachIndexed { index, step ->
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(glassSurface)
+                                .padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color.White.copy(alpha = 0.18f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "${index + 1}",
+                                    color = webText,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = step,
+                                color = webMuted,
+                                fontSize = 10.sp,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 12.sp,
+                            )
+                        }
+                    }
+                }
+            } else {
             // Información adicional
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1498,7 +1886,9 @@ fun DownloadReelsScreen(
                     )
                 }
             }
+            }
         }
+    }
     }
 }
 
@@ -1507,7 +1897,8 @@ fun DownloadReelsScreen(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun DownloadReelsHistoryDrawer(
+private fun DownloadReelsHistoryPanel(
+    modifier: Modifier = Modifier,
     zySession: ZonayummySession?,
     loading: Boolean,
     error: String,
@@ -1528,23 +1919,35 @@ private fun DownloadReelsHistoryDrawer(
     onOpenUrl: (String) -> Unit,
     onDownloadItem: (ZyHistoryItem) -> Unit,
     onEditItem: (ZyHistoryItem) -> Unit,
+    onOpenGallery: (() -> Unit)? = null,
 ) {
-    ModalDrawerSheet(
-        modifier = Modifier.widthIn(max = 380.dp),
-        drawerContainerColor = CeoStyle.Surface
-    ) {
-        Column(modifier = Modifier.fillMaxHeight().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Historial",
                     color = CeoStyle.Text,
                     fontWeight = FontWeight.Black,
-                    modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = CeoStyle.Muted)
+                Text(
+                    text = "Links + videos guardados",
+                    color = CeoStyle.Muted,
+                    fontSize = 11.sp,
+                )
+            }
+            if (onOpenGallery != null && zySession != null) {
+                IconButton(onClick = onOpenGallery) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_grid_view),
+                        contentDescription = "Galería de videos",
+                        tint = CeoStyle.Muted
+                    )
                 }
             }
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = CeoStyle.Muted)
+            }
+        }
 
             if (zySession == null) {
                 Text(
@@ -1655,6 +2058,7 @@ private fun DownloadReelsHistoryDrawer(
             }
 
             val scroll = rememberScrollState()
+            val sortedFolders = remember(folders) { folders.sortedBy { it.order } }
             val countsByFolderId = remember(items) {
                 val map = mutableMapOf<String, Int>()
                 for (it in items) {
@@ -1665,6 +2069,7 @@ private fun DownloadReelsHistoryDrawer(
             }
             val unassignedCount = remember(items) { items.count { it.folderId == null } }
             val allCount = remember(items) { items.size }
+            val labelsById = remember(labels) { labels.associateBy { it.id } }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
@@ -1705,7 +2110,7 @@ private fun DownloadReelsHistoryDrawer(
                         selectedBorderColor = CeoStyle.Cyan
                     )
                 )
-                folders.sortedBy { it.order }.forEach { f ->
+                sortedFolders.forEach { f ->
                     val c = countsByFolderId[f.id] ?: 0
                     val isSelected = folderFilter is ZyFolderFilter.Folder && (folderFilter as ZyFolderFilter.Folder).id == f.id
                     FilterChip(
@@ -1737,6 +2142,7 @@ private fun DownloadReelsHistoryDrawer(
                     is ZyFolderFilter.Folder -> items.filter { it.folderId == f.id }
                 }
             }
+            val foldersById = remember(folders) { folders.associateBy { it.id } }
 
             if (!loading && filtered.isEmpty()) {
                 Text(
@@ -1761,10 +2167,19 @@ private fun DownloadReelsHistoryDrawer(
                     key = { item -> item.id },
                     contentType = { "history_item" }
                 ) { item ->
+                    val folder = foldersById[item.folderId]
+                    val folderLabel = if (folder == null) {
+                        "📂 Sin carpeta"
+                    } else {
+                        "${folder.icon?.takeIf { it.isNotBlank() } ?: "📁"} ${folder.name}"
+                    }
+                    val labelObjs = remember(item.id, item.labelIds, labelsById) {
+                        item.labelIds.mapNotNull { labelsById[it] }.take(8)
+                    }
                     ZyHistoryItemCard(
                         item = item,
-                        folders = folders,
-                        labels = labels,
+                        folderLabel = folderLabel,
+                        labelObjs = labelObjs,
                         selected = selectedIds.contains(item.id),
                         onToggleSelect = { onToggleSelect(item.id) },
                         onCopy = { onCopyUrl(item.url) },
@@ -1774,16 +2189,70 @@ private fun DownloadReelsHistoryDrawer(
                     )
                 }
             }
-        }
     }
 }
 
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
-private fun ZyHistoryItemCard(
-    item: ZyHistoryItem,
+private fun DownloadReelsHistoryDrawer(
+    zySession: ZonayummySession?,
+    loading: Boolean,
+    error: String,
     folders: List<ZyFolder>,
     labels: List<ZyLabel>,
+    items: List<ZyHistoryItem>,
+    folderFilter: ZyFolderFilter,
+    selectedIds: Set<String>,
+    onSelectFolder: (ZyFolderFilter) -> Unit,
+    onRefresh: () -> Unit,
+    onCreateFolder: () -> Unit,
+    onDeleteSelectedFolder: () -> Unit,
+    onToggleSelect: (String) -> Unit,
+    onClearSelection: () -> Unit,
+    onMoveSelected: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onCopyUrl: (String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onDownloadItem: (ZyHistoryItem) -> Unit,
+    onEditItem: (ZyHistoryItem) -> Unit,
+    onOpenGallery: (() -> Unit)? = null,
+) {
+    ModalDrawerSheet(
+        modifier = Modifier.widthIn(max = 380.dp),
+        drawerContainerColor = CeoStyle.Surface
+    ) {
+        DownloadReelsHistoryPanel(
+            modifier = Modifier.fillMaxHeight().padding(12.dp),
+            zySession = zySession,
+            loading = loading,
+            error = error,
+            folders = folders,
+            labels = labels,
+            items = items,
+            folderFilter = folderFilter,
+            selectedIds = selectedIds,
+            onSelectFolder = onSelectFolder,
+            onRefresh = onRefresh,
+            onCreateFolder = onCreateFolder,
+            onDeleteSelectedFolder = onDeleteSelectedFolder,
+            onToggleSelect = onToggleSelect,
+            onClearSelection = onClearSelection,
+            onMoveSelected = onMoveSelected,
+            onDeleteSelected = onDeleteSelected,
+            onCopyUrl = onCopyUrl,
+            onOpenUrl = onOpenUrl,
+            onDownloadItem = onDownloadItem,
+            onEditItem = onEditItem,
+            onOpenGallery = onOpenGallery,
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+private fun ZyHistoryItemCard(
+    item: ZyHistoryItem,
+    folderLabel: String,
+    labelObjs: List<ZyLabel>,
     selected: Boolean,
     onToggleSelect: () -> Unit,
     onCopy: () -> Unit,
@@ -1791,14 +2260,9 @@ private fun ZyHistoryItemCard(
     onDownload: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val thumb = rememberRemoteBitmap(item.thumbnailUrlWithSas)
+    val thumb = rememberRemoteBitmap(cacheKey = item.id, url = item.thumbnailUrlWithSas)
     val title = item.title?.takeIf { it.isNotBlank() }
     val urlText = item.url
-    val folder = remember(item.folderId, folders) { folders.firstOrNull { it.id == item.folderId } }
-    val folderLabel = remember(folder) {
-        if (folder == null) "📂 Sin carpeta"
-        else "${folder.icon?.takeIf { it.isNotBlank() } ?: "📁"} ${folder.name}"
-    }
     val platformLabel = item.platform.uppercase()
 
     Card(
@@ -1893,19 +2357,17 @@ private fun ZyHistoryItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val labelObjs = remember(item.labelIds, labels) {
-                        val map = labels.associateBy { it.id }
-                        item.labelIds.mapNotNull { map[it] }.take(8)
-                    }
                     if (labelObjs.isNotEmpty()) {
                         Spacer(Modifier.height(4.dp))
-                        LazyRow(
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(end = 8.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            items(items = labelObjs, key = { it.id }) { l ->
-                                ZyLabelPill(label = l)
+                            labelObjs.forEach { l ->
+                                key(l.id) {
+                                    ZyLabelPill(label = l)
+                                }
                             }
                         }
                     }
@@ -1991,12 +2453,12 @@ private fun contrastTextColor(bg: Color): Color {
 }
 
 @Composable
-private fun rememberRemoteBitmap(url: String?): ImageBitmap? {
+private fun rememberRemoteBitmap(cacheKey: String, url: String?): ImageBitmap? {
     if (url.isNullOrBlank()) return null
-    val cached = remember(url) { RemoteBitmapMemoryCache.get(url) }
-    var bmp by remember(url) { mutableStateOf<ImageBitmap?>(cached) }
+    val cached = remember(cacheKey) { RemoteBitmapMemoryCache.get(cacheKey) }
+    var bmp by remember(cacheKey) { mutableStateOf<ImageBitmap?>(cached) }
 
-    LaunchedEffect(url) {
+    LaunchedEffect(cacheKey, url) {
         if (bmp != null) return@LaunchedEffect
 
         val decoded = withContext(Dispatchers.IO) {
@@ -2009,7 +2471,7 @@ private fun rememberRemoteBitmap(url: String?): ImageBitmap? {
         }
 
         if (decoded != null) {
-            RemoteBitmapMemoryCache.put(url, decoded)
+            RemoteBitmapMemoryCache.put(cacheKey, decoded)
             bmp = decoded
         }
     }
@@ -2507,6 +2969,307 @@ private fun ZyCreateFolderDialog(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Galería de videos (estilo web reel-downloader)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ZyHistoryGalleryDialog(
+    items: List<ZyHistoryItem>,
+    onDismiss: () -> Unit,
+    onCopyUrl: (String) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onDownloadItem: (ZyHistoryItem) -> Unit,
+) {
+    var selected by remember(items) {
+        mutableStateOf(items.firstOrNull { !it.downloadUrlWithSas.isNullOrBlank() } ?: items.firstOrNull())
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.92f),
+            shape = RoundedCornerShape(20.dp),
+            color = CeoStyle.Surface,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Galería de videos",
+                            fontWeight = FontWeight.Bold,
+                            color = CeoStyle.Text,
+                        )
+                        Text(
+                            text = "${items.size} guardados · toca un video para previsualizar",
+                            color = CeoStyle.Muted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar galería", tint = CeoStyle.Muted)
+                    }
+                }
+                HorizontalDivider(color = CeoStyle.Border)
+
+                if (items.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "No hay videos guardados en la nube.",
+                            color = CeoStyle.Muted,
+                            fontSize = 13.sp,
+                        )
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 108.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(items, key = { it.id }) { item ->
+                            val isSelected = selected?.id == item.id
+                            val thumb = rememberRemoteBitmap(cacheKey = "gallery-${item.id}", url = item.thumbnailUrlWithSas)
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(9f / 16f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(platformItemGradient(item.platform))
+                                    .clickable { selected = item }
+                                    .then(
+                                        if (isSelected) Modifier.background(CeoStyle.Cyan.copy(alpha = 0.18f))
+                                        else Modifier
+                                    ),
+                            ) {
+                                if (thumb != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = thumb,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    Icon(
+                                        painter = painterResource(id = platformIconRes(item.platform)),
+                                        contentDescription = null,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .size(28.dp),
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(6.dp)
+                                        .size(20.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.Black.copy(alpha = 0.45f))
+                                        .padding(3.dp),
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = platformIconRes(item.platform)),
+                                        contentDescription = null,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                                            )
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                                ) {
+                                    Text(
+                                        text = item.title ?: platformDisplayName(item.platform),
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(Color.White.copy(alpha = 0.9f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color(0xFF111827),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    selected?.let { item ->
+                        HorizontalDivider(color = CeoStyle.Border)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                        ) {
+                            Text(
+                                text = item.title ?: platformDisplayName(item.platform),
+                                fontWeight = FontWeight.Bold,
+                                color = CeoStyle.Text,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val videoUrl = item.downloadUrlWithSas
+                            if (!videoUrl.isNullOrBlank()) {
+                                // 9:16 default (vertical reels); updated from real video size onPrepared
+                                var videoAspect by remember(item.id) { mutableStateOf(9f / 16f) }
+                                var isPlaying by remember(item.id) { mutableStateOf(true) }
+                                var isMuted by remember(item.id) { mutableStateOf(false) }
+                                var mediaPlayer by remember(item.id) { mutableStateOf<MediaPlayer?>(null) }
+                                var videoView by remember(item.id) { mutableStateOf<VideoView?>(null) }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 320.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .aspectRatio(videoAspect)
+                                            .heightIn(max = 320.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color.Black),
+                                    ) {
+                                        AndroidView(
+                                            modifier = Modifier.fillMaxSize(),
+                                            factory = { ctx ->
+                                                VideoView(ctx).apply {
+                                                    videoView = this
+                                                    setVideoURI(Uri.parse(videoUrl))
+                                                    setOnPreparedListener { mp ->
+                                                        mp.isLooping = true
+                                                        mediaPlayer = mp
+                                                        val w = mp.videoWidth
+                                                        val h = mp.videoHeight
+                                                        if (w > 0 && h > 0) videoAspect = w.toFloat() / h.toFloat()
+                                                        val v = if (isMuted) 0f else 1f
+                                                        mp.setVolume(v, v)
+                                                        if (isPlaying) start() else pause()
+                                                    }
+                                                }
+                                            },
+                                            update = { view ->
+                                                if (view.tag != videoUrl) {
+                                                    view.tag = videoUrl
+                                                    view.setVideoURI(Uri.parse(videoUrl))
+                                                }
+                                            },
+                                        )
+                                        // Overlay controls
+                                        Row(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .background(Color.Black.copy(alpha = 0.35f))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            IconButton(
+                                                onClick = {
+                                                    val v = videoView ?: return@IconButton
+                                                    if (isPlaying) { v.pause(); isPlaying = false }
+                                                    else { v.start(); isPlaying = true }
+                                                },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow),
+                                                    contentDescription = if (isPlaying) "Pausar" else "Reproducir",
+                                                    tint = Color.White,
+                                                )
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    isMuted = !isMuted
+                                                    val v = if (isMuted) 0f else 1f
+                                                    mediaPlayer?.setVolume(v, v)
+                                                },
+                                                modifier = Modifier.size(32.dp),
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = if (isMuted) R.drawable.ic_volume_off else R.drawable.ic_volume_up),
+                                                    contentDescription = if (isMuted) "Activar audio" else "Silenciar",
+                                                    tint = Color.White,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(120.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(CeoStyle.Bg),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "Video no disponible (URL expirada). Actualiza el historial.",
+                                        color = CeoStyle.Muted,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(12.dp),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { onOpenUrl(item.url) },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Abrir link", fontSize = 11.sp) }
+                                OutlinedButton(
+                                    onClick = { onCopyUrl(item.url) },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Copiar link", fontSize = 11.sp) }
+                                Button(
+                                    onClick = { onDownloadItem(item) },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !item.downloadUrlWithSas.isNullOrBlank(),
+                                ) { Text("Descargar", fontSize = 11.sp) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Previews (Android Studio)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2523,6 +3286,7 @@ private fun Preview_DownloadReelsScreen_Guest() {
                 setState(DownloadState.CloudSaving(30, "Preview…"))
             },
             onRefreshHistory = {},
+            onPrependCloudHistoryItem = { _, _, _ -> },
             onUploadFileToBlob = { _, _, _, _ -> Result.success(Unit) }
         )
     }
@@ -2541,6 +3305,7 @@ private fun Preview_DownloadReelsScreen_LoggedIn() {
                 setState(DownloadState.CloudSuccess("✅ Guardado (preview)"))
             },
             onRefreshHistory = {},
+            onPrependCloudHistoryItem = { _, _, _ -> },
             onUploadFileToBlob = { _, _, _, _ -> Result.success(Unit) }
         )
     }

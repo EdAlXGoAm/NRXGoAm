@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#E4405F" />
-</shape>
-
-
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Rounded camera body -->
+    <path
+        android:fillColor="#E4405F"
+        android:pathData="M7,2.5h10a4.5,4.5 0 0 1 4.5,4.5v10a4.5,4.5 0 0 1 -4.5,4.5h-10a4.5,4.5 0 0 1 -4.5,-4.5v-10a4.5,4.5 0 0 1 4.5,-4.5zM7,4.5a2.5,2.5 0 0 0 -2.5,2.5v10a2.5,2.5 0 0 0 2.5,2.5h10a2.5,2.5 0 0 0 2.5,-2.5v-10a2.5,2.5 0 0 0 -2.5,-2.5z" />
+    <!-- Lens -->
+    <path
+        android:fillColor="#E4405F"
+        android:pathData="M12,7.5a4.5,4.5 0 1 0 0,9a4.5,4.5 0 0 0 0,-9zM12,9.5a2.5,2.5 0 1 1 0,5a2.5,2.5 0 0 1 0,-5z" />
+    <!-- Top-right dot -->
+    <path
+        android:fillColor="#E4405F"
+        android:pathData="M17.5,5.5m-1,0a1,1 0 1 1 2,0a1,1 0 1 1 -2,0" />
+</vector>
