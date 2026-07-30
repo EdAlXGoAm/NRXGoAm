@@ -55,6 +55,7 @@ import com.edalxgoam.nrxgoam.ui.screens.AlarmActivity
 import com.edalxgoam.nrxgoam.ui.screens.DownloadReelsActivity
 import com.edalxgoam.nrxgoam.ui.screens.PantryActivity
 import com.edalxgoam.nrxgoam.ui.screens.TaskActivity
+import com.edalxgoam.nrxgoam.ui.screens.FinancePrototypeApp
 import com.edalxgoam.nrxgoam.ui.theme.*
 import java.util.*
 import kotlinx.coroutines.*
@@ -144,31 +145,7 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             NRXGoAmTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainMenu(
-                        modifier = Modifier.padding(innerPadding),
-                        onAlarmClick = {
-                            val intent = Intent(this, AlarmActivity::class.java)
-                            startActivity(intent)
-                        },
-                        onPantryClick = {
-                            val intent = Intent(this, PantryActivity::class.java)
-                            startActivity(intent)
-                        },
-                        onTaskClick = {
-                            val intent = Intent(this, TaskActivity::class.java)
-                            startActivity(intent)
-                        },
-                        onDownloadReelsClick = {
-                            val intent = Intent(this, DownloadReelsActivity::class.java)
-                            startActivity(intent)
-                        },
-                        isBubbleEnabled = isBubbleEnabled.value,
-                        onBubbleToggle = { enabled ->
-                            toggleFloatingBubble(enabled)
-                        }
-                    )
-                }
+                FinancePrototypeApp()
             }
         }
     }
